@@ -155,8 +155,21 @@ async function meterDataforseoCall<T>(
   const isHostedMode = await isHostedServerAuthMode();
 
   if (!isHostedMode) {
-    const result = await execute();
-    return result.data;
+    // Self-hosting has no credit ledger, but DataForSEO still bills every call
+    // against the deployment's own account. Log what the provider charged so the
+    // spend is visible somewhere; otherwise result.billing is dropped here and
+    // the operator's only meter is the DataForSEO dashboard.
+    try {
+      const result = await execute();
+      logSelfHostDataforseoCost(result.billing);
+      return result.data;
+    } catch (error) {
+      // A task that failed after DataForSEO billed it still costs money.
+      if (error instanceof DataforseoChargedTaskError) {
+        logSelfHostDataforseoCost(error.billing);
+      }
+      throw error;
+    }
   }
 
   const billingCustomer = await getOrCreateOrganizationCustomer(customer);
@@ -198,6 +211,23 @@ async function meterDataforseoCall<T>(
   });
 
   return result.data;
+}
+
+let selfHostSpendUsd = 0;
+let selfHostCallCount = 0;
+
+/**
+ * Reports what a DataForSEO call cost on a self-hosted deployment, where no
+ * credit ledger records it. The running total is per worker instance and resets
+ * on restart: it exists to make a runaway agent visible in the logs, not to
+ * replace the DataForSEO dashboard as the source of truth.
+ */
+function logSelfHostDataforseoCost(billing: DataforseoApiCallCost) {
+  selfHostSpendUsd += billing.costUsd;
+  selfHostCallCount += 1;
+  console.log(
+    `[dataforseo] cost=${billing.costUsd.toFixed(6)} path=${billing.path.join("/")} total=${selfHostSpendUsd.toFixed(6)} calls=${selfHostCallCount}`,
+  );
 }
 
 async function trackDataforseoCost(args: {

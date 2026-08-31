@@ -158,6 +158,22 @@ describe("meterDataforseoCall with split balances", () => {
     expect(trackMock).not.toHaveBeenCalled();
   });
 
+  it("logs the provider cost in non-hosted mode, where nothing else records it", async () => {
+    isHostedServerAuthModeMock.mockResolvedValue(false);
+    mockDataforseoResult(0.05);
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    const client = createDataforseoClient(billingCustomer);
+    await client.backlinks.summary(backlinksInput);
+
+    expect(log).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "[dataforseo] cost=0.050000 path=backlinks/summary",
+      ),
+    );
+    log.mockRestore();
+  });
+
   it("checks both monthly and topup balances in parallel", async () => {
     setupHostedMode();
     mockBalances(5000, 3000);
