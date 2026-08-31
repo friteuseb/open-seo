@@ -43,6 +43,7 @@ function page(
     imagesMissingAlt: 0,
     images: [],
     links: [],
+    keywords: [],
     hasStructuredData: false,
     hreflangTags: [],
     isIndexable: true,

@@ -118,6 +118,16 @@ export const auditPages = pgTable(
       .default("ok"),
     // Performance
     responseTimeMs: integer("response_time_ms"),
+    // Internal-linking analysis
+    // Bounded weighted keyword list (top ~20 terms from title/meta/H1/body),
+    // computed once at crawl time. Used for cross-page similarity at
+    // finalize; never sent to the client.
+    keywordsJson: text("keywords_json"),
+    // Site-wide graph metrics computed at finalize from the scratchpad DO's
+    // link edges (never persisted themselves — see AuditScratchpad).
+    pagerank: real("pagerank"),
+    centralityScore: real("centrality_score"),
+    inboundLinkCount: integer("inbound_link_count"),
   },
   (table) => [index("audit_pages_audit_url_idx").on(table.auditId, table.url)],
 );

@@ -39,6 +39,12 @@ vi.mock("@/server/features/audit/repositories/AuditRepository", () => ({
     updateAuditProgress: updateAuditProgressMock,
   },
 }));
+vi.mock("@/server/features/audit/repositories/LinkGraphRepository", () => ({
+  LinkGraphRepository: {
+    getPagesForSimilarity: vi.fn(),
+    updateLinkGraphMetrics: vi.fn(),
+  },
+}));
 vi.mock("@/server/features/audit/AuditScratchpad", () => ({
   getAuditScratchpad: vi.fn(),
 }));

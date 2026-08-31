@@ -5,6 +5,7 @@
 import { z } from "zod";
 import { MIN_AUDIT_PAGES, PAID_MAX_AUDIT_PAGES } from "@/shared/audit-limits";
 import { jsonCodec } from "@/shared/json";
+import type { PageKeyword } from "@/server/lib/audit/keyword-extraction";
 
 export type LighthouseStrategy = "auto" | "none";
 
@@ -150,6 +151,8 @@ export interface CrawledPageResult {
   imagesMissingAlt: number;
   images: Array<{ src: string | null; alt: string | null }>;
   links: PageLink[];
+  /** Bounded weighted keyword set for internal-linking similarity. */
+  keywords: PageKeyword[];
   hasStructuredData: boolean;
   hreflangTags: string[];
   isIndexable: boolean;

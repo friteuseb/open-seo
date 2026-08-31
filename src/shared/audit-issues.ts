@@ -232,6 +232,14 @@ export const AUDIT_ISSUE_TYPES = {
     howToFix:
       "Add links from higher-level pages (hubs, category pages, navigation) to flatten the path to this page.",
   },
+  "internal-linking-opportunity": {
+    severity: "info",
+    title: "Internal linking opportunity",
+    explanation:
+      "This page is topically similar to another crawled page, based on title/heading/content keywords, but neither page currently links to the other. Linking related pages together spreads link equity and helps both users and search engines discover related content.",
+    howToFix:
+      "Add a contextual link from this page to the suggested target (or vice versa) using descriptive anchor text.",
+  },
 } as const satisfies Record<string, AuditIssueDescriptor>;
 
 export type AuditIssueType = keyof typeof AUDIT_ISSUE_TYPES;

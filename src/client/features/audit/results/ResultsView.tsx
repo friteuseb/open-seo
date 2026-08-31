@@ -16,8 +16,9 @@ import {
   ExportDropdown,
   PerformanceTable,
 } from "@/client/features/audit/results/ResultsTables";
+import { InternalLinkingView } from "@/client/features/audit/internal-linking/InternalLinkingView";
 
-type ResultsTab = "issues" | "pages" | "performance";
+type ResultsTab = "issues" | "pages" | "performance" | "internal-linking";
 
 export function ResultsView({
   projectId,
@@ -124,6 +125,9 @@ export function ResultsView({
               pages={pages}
             />
           )}
+          {activeTab === "internal-linking" && (
+            <InternalLinkingView pages={pages} issues={issues} />
+          )}
         </div>
       </div>
     </>
@@ -202,6 +206,7 @@ function ResultsHeader({
           },
         ]
       : []),
+    { tab: "internal-linking", label: "Internal Linking" },
   ];
 
   return (

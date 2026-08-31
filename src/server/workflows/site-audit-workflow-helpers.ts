@@ -4,6 +4,7 @@ import type {
 } from "@/server/lib/audit/types";
 import { sha256Hex } from "@/server/lib/audit/ids";
 import { normalizeUrl } from "@/server/lib/audit/url-utils";
+import { extractPageKeywords } from "@/server/lib/audit/keyword-extraction";
 
 const CRAWL_USER_AGENT = "OpenSEO-Audit/1.0";
 const MAX_HTML_BYTES = 1024 * 1024;
@@ -181,6 +182,12 @@ export async function crawlPage(
         .length,
       images: analysis.images,
       links: analysis.links,
+      keywords: extractPageKeywords([
+        { text: analysis.title, weight: 3 },
+        { text: analysis.metaDescription, weight: 2 },
+        { text: analysis.h1s.join(" "), weight: 2 },
+        { text: analysis.bodyText, weight: 1 },
+      ]),
       hasStructuredData: analysis.hasStructuredData,
       hreflangTags: analysis.hreflangTags,
       isIndexable,
@@ -279,6 +286,7 @@ function emptyPageResult(input: {
     imagesMissingAlt: 0,
     images: [],
     links: [],
+    keywords: [],
     hasStructuredData: false,
     hreflangTags: [],
     isIndexable: false,

@@ -46,6 +46,7 @@ function makePage(overrides: Partial<CrawledPageResult>): CrawledPageResult {
     imagesMissingAlt: 0,
     images: [],
     links: [HEALTHY_LINK],
+    keywords: [],
     hasStructuredData: false,
     hreflangTags: [],
     isIndexable: true,

@@ -190,6 +190,7 @@ async function insertCrawledBatch(
       crawlDepth: page.crawlDepth,
       inSitemap: page.inSitemap,
       responseTimeMs: page.responseTimeMs,
+      keywordsJson: page.keywords.length ? JSON.stringify(page.keywords) : null,
     };
     return tx
       .insert(auditPages)

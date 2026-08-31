@@ -72,7 +72,9 @@ function AuditDetail({
   auditId: string;
   tab: string;
   onBack: () => void;
-  onTabChange: (tab: "issues" | "pages" | "performance") => void;
+  onTabChange: (
+    tab: "issues" | "pages" | "performance" | "internal-linking",
+  ) => void;
 }) {
   const statusQuery = useQuery({
     queryKey: ["audit-status", projectId, auditId],

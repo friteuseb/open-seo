@@ -18,6 +18,10 @@
  * every insert is OR IGNORE / OR REPLACE on a stable key.
  */
 import { DurableObject, env } from "cloudflare:workers";
+import {
+  computeLinkGraphMetrics,
+  type PageLinkMetrics,
+} from "@/server/lib/audit/link-graph-metrics";
 
 export interface ClaimedUrl {
   url: string;
@@ -81,6 +85,21 @@ interface BrokenLinkRow {
 interface OrphanPageRow {
   pageId: string;
   url: string;
+}
+
+export interface SimilarityCandidate {
+  sourcePageId: string;
+  sourceUrl: string;
+  targetPageId: string;
+  targetUrl: string;
+  score: number;
+}
+
+export interface LinkGraphAnalysis {
+  /** null when the crawl's link storage budget was exceeded (see recordBatch) — the edge set is incomplete, so metrics would be misleading. */
+  pageMetrics: PageLinkMetrics[] | null;
+  /** `candidates` filtered down to pairs with no existing edge between them. */
+  missingLinkPairs: SimilarityCandidate[];
 }
 
 const BROKEN_LINK_ISSUE_CAP = 2_000;
@@ -315,6 +334,59 @@ export class AuditScratchpad extends DurableObject {
         : [];
 
     return { brokenLinks, orphanPages };
+  }
+
+  /**
+   * Internal-linking graph analysis: PageRank/centrality/inbound counts over
+   * the full internal-link edge set, plus which similarity `candidates`
+   * (computed outside the DO, from persisted page keywords) have no
+   * existing link between them yet. Like runFinalizeChecks, this must run
+   * before destroy() — it's the only place the edge list exists.
+   */
+  async computeLinkGraphAnalysis(input: {
+    candidates: SimilarityCandidate[];
+  }): Promise<LinkGraphAnalysis> {
+    const linkGraphComplete =
+      this.ctx.storage.sql.databaseSize < LINK_STORAGE_BUDGET_BYTES;
+    if (!linkGraphComplete) {
+      return { pageMetrics: null, missingLinkPairs: [] };
+    }
+
+    const nodeIds = this.ctx.storage.sql
+      .exec<{ page_id: string }>(`SELECT page_id FROM page_mirror`)
+      .toArray()
+      .map((row) => row.page_id);
+
+    const edges = this.ctx.storage.sql
+      .exec<{
+        source_page_id: string;
+        target_page_id: string;
+      }>(
+        `SELECT l.source_page_id, m.page_id AS target_page_id
+         FROM links l JOIN page_mirror m ON m.url = l.target_url`,
+      )
+      .toArray()
+      .map((row) => ({
+        sourcePageId: row.source_page_id,
+        targetPageId: row.target_page_id,
+      }));
+
+    const { pageMetrics } = computeLinkGraphMetrics(nodeIds, edges);
+
+    const missingLinkPairs = input.candidates.filter((candidate) => {
+      const existing = this.ctx.storage.sql
+        .exec<{
+          n: number;
+        }>(
+          `SELECT COUNT(*) AS n FROM links WHERE source_page_id = ? AND target_url = ?`,
+          candidate.sourcePageId,
+          candidate.targetUrl,
+        )
+        .one();
+      return existing.n === 0;
+    });
+
+    return { pageMetrics, missingLinkPairs };
   }
 
   /** Wipe all state (success path, or explicit audit deletion). */

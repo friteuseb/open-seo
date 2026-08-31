@@ -14,9 +14,11 @@ import {
 } from "@/server/lib/audit/url-utils";
 import { isCrawlableUrl } from "@/server/lib/audit/url-policy";
 import { AuditRepository } from "@/server/features/audit/repositories/AuditRepository";
+import { LinkGraphRepository } from "@/server/features/audit/repositories/LinkGraphRepository";
 import { getAuditScratchpad } from "@/server/features/audit/AuditScratchpad";
 import { AuditProgressKV } from "@/server/lib/audit/progress-kv";
 import { runMultipageChecks } from "@/server/lib/audit/issues/multipage";
+import { findSimilarPagePairs } from "@/server/lib/audit/similarity";
 import type { DetectedIssue } from "@/server/lib/audit/issues/page-reporters";
 import type { AuditConfig } from "@/server/lib/audit/types";
 import { captureServerEvent } from "@/server/lib/posthog";
@@ -350,6 +352,7 @@ async function finalizeAudit(args: {
 
     const issues = await runMultipageChecks({ auditId });
     issues.push(...(await runScratchpadLinkChecks(auditId, startUrl, crawl)));
+    issues.push(...(await runInternalLinkingAnalysis(auditId)));
     await AuditRepository.insertIssues(auditId, issues);
     return { issueCount: issues.length };
   });
@@ -412,4 +415,38 @@ async function runScratchpadLinkChecks(
       pageUrl: row.url,
     })),
   ];
+}
+
+/**
+ * Internal-linking analysis: computes PageRank/centrality/inbound counts
+ * over the crawl's link graph and flags topically-similar pages that aren't
+ * linked yet. Similarity is computed here (over pages already persisted to
+ * the app DB) since it needs page keywords, not link edges; the missing-link
+ * check itself runs inside the scratchpad DO, the only place the edges are.
+ */
+async function runInternalLinkingAnalysis(
+  auditId: string,
+): Promise<DetectedIssue[]> {
+  const pages = await LinkGraphRepository.getPagesForSimilarity(auditId);
+  const candidatePairs = findSimilarPagePairs(pages);
+  if (candidatePairs.length === 0 && pages.length === 0) return [];
+
+  const { pageMetrics, missingLinkPairs } = await getAuditScratchpad(
+    auditId,
+  ).computeLinkGraphAnalysis({ candidates: candidatePairs });
+
+  if (pageMetrics) {
+    await LinkGraphRepository.updateLinkGraphMetrics(auditId, pageMetrics);
+  }
+
+  return missingLinkPairs.map((pair) => ({
+    issueType: "internal-linking-opportunity" as const,
+    pageId: pair.sourcePageId,
+    pageUrl: pair.sourceUrl,
+    dedupeKey: pair.targetUrl,
+    details: {
+      targetUrl: pair.targetUrl,
+      similarityScore: Math.round(pair.score * 100) / 100,
+    },
+  }));
 }
