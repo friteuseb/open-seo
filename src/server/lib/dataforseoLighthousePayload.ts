@@ -7,6 +7,7 @@ import {
   scoreToPercent,
   type StoredLighthousePayload,
   storedLighthousePayloadSchema,
+  summarizeZodIssues,
 } from "@/server/lib/lighthouseStoredPayload";
 
 export const requestCategories = [
@@ -44,16 +45,6 @@ const dataforseoLighthouseResponseSchema = z.object({
   status_message: z.string().optional(),
   tasks: z.array(dataforseoTaskSchema).optional(),
 });
-
-function summarizeZodIssues(error: z.ZodError, maxIssues = 3): string {
-  return error.issues
-    .slice(0, maxIssues)
-    .map((issue) => {
-      const path = issue.path.length > 0 ? issue.path.join(".") : "<root>";
-      return `${path}: ${issue.message}`;
-    })
-    .join("; ");
-}
 
 export function parseDataforseoLighthousePayload(
   payload: unknown,

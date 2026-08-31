@@ -1,6 +1,62 @@
 import { z } from "zod";
 import { LIGHTHOUSE_CATEGORIES } from "@/shared/lighthouse";
 
+// The `audits` and `categories` shapes below are plain Lighthouse output, not a
+// provider format: DataForSEO and PageSpeed Insights each wrap the same object
+// in their own envelope. They live here, beside the builders that consume them,
+// so both provider parsers validate against one definition.
+
+const lighthouseAuditItemsSchema = z
+  .union([
+    z.array(z.record(z.string(), z.unknown())),
+    z.record(z.string(), z.unknown()),
+  ])
+  .transform((items) => (Array.isArray(items) ? items : [items]));
+
+export const lighthouseAuditSchema = z
+  .object({
+    score: z.number().nullable().optional(),
+    displayValue: z.string().optional(),
+    numericValue: z.number().optional(),
+    title: z.string().optional(),
+    description: z.string().optional(),
+    scoreDisplayMode: z.string().optional(),
+    details: z
+      .object({
+        overallSavingsMs: z.number().optional(),
+        overallSavingsBytes: z.number().optional(),
+        items: lighthouseAuditItemsSchema.optional(),
+      })
+      .passthrough()
+      .optional(),
+  })
+  .passthrough();
+
+export const lighthouseCategorySchema = z
+  .object({
+    score: z.number().nullable().optional(),
+    auditRefs: z
+      .array(
+        z
+          .object({
+            id: z.string().optional(),
+          })
+          .passthrough(),
+      )
+      .optional(),
+  })
+  .passthrough();
+
+export function summarizeZodIssues(error: z.ZodError, maxIssues = 3): string {
+  return error.issues
+    .slice(0, maxIssues)
+    .map((issue) => {
+      const path = issue.path.length > 0 ? issue.path.join(".") : "<root>";
+      return `${path}: ${issue.message}`;
+    })
+    .join("; ");
+}
+
 export type RawLighthouseAudit = {
   title?: string;
   description?: string;
@@ -56,7 +112,9 @@ const storedLighthouseIssueSchema = z.object({
 
 export const storedLighthousePayloadSchema = z.object({
   version: z.literal(2),
-  source: z.literal("dataforseo-lighthouse"),
+  // Which provider ran Lighthouse. Stored payloads predating PageSpeed support
+  // all carry "dataforseo-lighthouse", so the literal widens instead of moving.
+  source: z.enum(["dataforseo-lighthouse", "pagespeed-insights"]),
   hasIssueDetails: z.boolean(),
   metadata: z.object({
     requestedUrl: z.string(),

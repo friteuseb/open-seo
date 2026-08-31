@@ -1,6 +1,8 @@
 import { detectUrlTemplate, canonicalUrlKey } from "./url-utils";
 import type { BillingCustomerContext } from "@/server/billing/subscription";
 import { createDataforseoClient } from "@/server/lib/dataforseo";
+import { fetchPagespeedLighthouseResult } from "@/server/lib/pagespeedLighthouse";
+import { getOptionalEnvValue } from "@/server/lib/runtime-env";
 import type { LighthouseResult, LighthouseStrategy } from "./types";
 import { putTextToR2 } from "@/server/lib/r2";
 
@@ -54,9 +56,21 @@ export async function fetchLighthouseResult(
   strategy: "mobile" | "desktop",
   billingCustomer: BillingCustomerContext,
 ): Promise<LighthouseFetchResult> {
-  const dataforseo = createDataforseoClient(billingCustomer);
+  // PageSpeed Insights runs the same Lighthouse for free, so prefer it whenever
+  // a key is configured and fall back to the paid provider otherwise. Google
+  // fetches the URL itself, so a site it cannot reach still needs DataForSEO.
+  const pagespeedApiKey = await getOptionalEnvValue("PAGESPEED_API_KEY");
   try {
-    const data = await dataforseo.lighthouse.live({ url, strategy });
+    const data = pagespeedApiKey
+      ? await fetchPagespeedLighthouseResult({
+          url,
+          strategy,
+          apiKey: pagespeedApiKey,
+        })
+      : await createDataforseoClient(billingCustomer).lighthouse.live({
+          url,
+          strategy,
+        });
 
     return {
       result: {
