@@ -36,6 +36,8 @@ async function getPagesForSimilarity(auditId: string) {
       id: auditPages.id,
       url: auditPages.url,
       keywordsJson: auditPages.keywordsJson,
+      title: auditPages.title,
+      metaDescription: auditPages.metaDescription,
     })
     .from(auditPages)
     .where(eq(auditPages.auditId, auditId));
@@ -44,6 +46,8 @@ async function getPagesForSimilarity(auditId: string) {
     pageId: row.id,
     url: row.url,
     keywords: parseKeywords(row.keywordsJson),
+    title: row.title,
+    metaDescription: row.metaDescription,
   }));
 }
 

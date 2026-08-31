@@ -24,6 +24,96 @@ export interface SimilarPagePair {
 const DEFAULT_THRESHOLD = 0.3;
 const DEFAULT_MAX_PER_PAGE = 5;
 
+/**
+ * Dense embedding cosines sit far higher than sparse TF-IDF ones — unrelated
+ * pages from one site still score ~0.5 — so the embedding path needs its own
+ * threshold. 0.75 keeps pairs that are genuinely about the same topic.
+ */
+const DEFAULT_EMBEDDING_THRESHOLD = 0.75;
+
+export interface EmbeddedCandidatePage {
+  pageId: string;
+  url: string;
+  vector: number[];
+}
+
+function denseCosineSimilarity(a: number[], b: number[]): number {
+  let dot = 0;
+  let magnitudeA = 0;
+  let magnitudeB = 0;
+
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    magnitudeA += a[i] * a[i];
+    magnitudeB += b[i] * b[i];
+  }
+
+  if (magnitudeA === 0 || magnitudeB === 0) return 0;
+  return dot / (Math.sqrt(magnitudeA) * Math.sqrt(magnitudeB));
+}
+
+/**
+ * Shared pair selection: every i<j pair scoring at or above `threshold`,
+ * recorded in both directions and capped at `maxPerPage` per source page.
+ */
+function collectPairs(
+  pages: Array<{ pageId: string; url: string }>,
+  score: (i: number, j: number) => number,
+  threshold: number,
+  maxPerPage: number,
+): SimilarPagePair[] {
+  const pairsBySource = new Map<string, SimilarPagePair[]>();
+  for (let i = 0; i < pages.length; i++) {
+    for (let j = i + 1; j < pages.length; j++) {
+      const value = score(i, j);
+      if (value < threshold) continue;
+
+      for (const [from, to] of [
+        [i, j],
+        [j, i],
+      ]) {
+        const pair: SimilarPagePair = {
+          sourcePageId: pages[from].pageId,
+          sourceUrl: pages[from].url,
+          targetPageId: pages[to].pageId,
+          targetUrl: pages[to].url,
+          score: value,
+        };
+        pairsBySource.set(pair.sourcePageId, [
+          ...(pairsBySource.get(pair.sourcePageId) ?? []),
+          pair,
+        ]);
+      }
+    }
+  }
+
+  const result: SimilarPagePair[] = [];
+  for (const pairs of pairsBySource.values()) {
+    result.push(
+      ...pairs.toSorted((a, b) => b.score - a.score).slice(0, maxPerPage),
+    );
+  }
+  return result;
+}
+
+/**
+ * Same output as findSimilarPagePairs, scored on dense page embeddings instead
+ * of TF-IDF. Embeddings capture topical relatedness through different wording,
+ * which term overlap misses — two pages about roof repair share no vocabulary
+ * if one says "toiture" and the other "couverture".
+ */
+export function findSimilarPagePairsFromVectors(
+  pages: EmbeddedCandidatePage[],
+  options: { threshold?: number; maxPerPage?: number } = {},
+): SimilarPagePair[] {
+  return collectPairs(
+    pages,
+    (i, j) => denseCosineSimilarity(pages[i].vector, pages[j].vector),
+    options.threshold ?? DEFAULT_EMBEDDING_THRESHOLD,
+    options.maxPerPage ?? DEFAULT_MAX_PER_PAGE,
+  );
+}
+
 function toTfIdfVector(
   keywords: PageKeyword[],
   idf: Map<string, number>,
@@ -82,43 +172,10 @@ export function findSimilarPagePairs(
 
   const vectors = pages.map((page) => toTfIdfVector(page.keywords, idf));
 
-  const pairsBySource = new Map<string, SimilarPagePair[]>();
-  for (let i = 0; i < pages.length; i++) {
-    for (let j = i + 1; j < pages.length; j++) {
-      const score = cosineSimilarity(vectors[i], vectors[j]);
-      if (score < threshold) continue;
-
-      const forward: SimilarPagePair = {
-        sourcePageId: pages[i].pageId,
-        sourceUrl: pages[i].url,
-        targetPageId: pages[j].pageId,
-        targetUrl: pages[j].url,
-        score,
-      };
-      const backward: SimilarPagePair = {
-        sourcePageId: pages[j].pageId,
-        sourceUrl: pages[j].url,
-        targetPageId: pages[i].pageId,
-        targetUrl: pages[i].url,
-        score,
-      };
-
-      pairsBySource.set(forward.sourcePageId, [
-        ...(pairsBySource.get(forward.sourcePageId) ?? []),
-        forward,
-      ]);
-      pairsBySource.set(backward.sourcePageId, [
-        ...(pairsBySource.get(backward.sourcePageId) ?? []),
-        backward,
-      ]);
-    }
-  }
-
-  const result: SimilarPagePair[] = [];
-  for (const pairs of pairsBySource.values()) {
-    result.push(
-      ...pairs.toSorted((a, b) => b.score - a.score).slice(0, maxPerPage),
-    );
-  }
-  return result;
+  return collectPairs(
+    pages,
+    (i, j) => cosineSimilarity(vectors[i], vectors[j]),
+    threshold,
+    maxPerPage,
+  );
 }

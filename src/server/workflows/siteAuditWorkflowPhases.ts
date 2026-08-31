@@ -1,4 +1,5 @@
 import type { WorkflowStep } from "cloudflare:workers";
+import { findSimilarPagesForAudit } from "./site-audit-workflow-helpers";
 import type { BillingCustomerContext } from "@/server/billing/subscription";
 import { discoverUrls, parseRobotsTxt } from "@/server/lib/audit/discovery";
 import {
@@ -18,7 +19,6 @@ import { LinkGraphRepository } from "@/server/features/audit/repositories/LinkGr
 import { getAuditScratchpad } from "@/server/features/audit/AuditScratchpad";
 import { AuditProgressKV } from "@/server/lib/audit/progress-kv";
 import { runMultipageChecks } from "@/server/lib/audit/issues/multipage";
-import { findSimilarPagePairs } from "@/server/lib/audit/similarity";
 import type { DetectedIssue } from "@/server/lib/audit/issues/page-reporters";
 import type { AuditConfig } from "@/server/lib/audit/types";
 import { captureServerEvent } from "@/server/lib/posthog";
@@ -428,7 +428,7 @@ async function runInternalLinkingAnalysis(
   auditId: string,
 ): Promise<DetectedIssue[]> {
   const pages = await LinkGraphRepository.getPagesForSimilarity(auditId);
-  const candidatePairs = findSimilarPagePairs(pages);
+  const candidatePairs = await findSimilarPagesForAudit(pages);
   if (candidatePairs.length === 0 && pages.length === 0) return [];
 
   const { pageMetrics, missingLinkPairs } = await getAuditScratchpad(

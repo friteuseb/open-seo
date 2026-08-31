@@ -5,6 +5,15 @@ import type {
 import { sha256Hex } from "@/server/lib/audit/ids";
 import { normalizeUrl } from "@/server/lib/audit/url-utils";
 import { extractPageKeywords } from "@/server/lib/audit/keyword-extraction";
+import {
+  buildPageEmbeddingText,
+  embedTexts,
+} from "@/server/lib/audit/embeddings";
+import {
+  findSimilarPagePairs,
+  findSimilarPagePairsFromVectors,
+  type SimilarityCandidatePage,
+} from "@/server/lib/audit/similarity";
 
 const CRAWL_USER_AGENT = "OpenSEO-Audit/1.0";
 const MAX_HTML_BYTES = 1024 * 1024;
@@ -294,4 +303,29 @@ function emptyPageResult(input: {
     crawlDepth: input.crawlDepth,
     inSitemap: input.inSitemap,
   };
+}
+
+/**
+ * Topically-similar page pairs for the internal-linking analysis, scored on
+ * embeddings when the deployment provides an endpoint and on TF-IDF otherwise.
+ * embedTexts already swallows endpoint failures, so this never fails the audit.
+ */
+export async function findSimilarPagesForAudit(
+  pages: Array<
+    SimilarityCandidatePage & {
+      title: string | null;
+      metaDescription: string | null;
+    }
+  >,
+) {
+  const vectors = await embedTexts(pages.map(buildPageEmbeddingText));
+  if (!vectors) return findSimilarPagePairs(pages);
+
+  return findSimilarPagePairsFromVectors(
+    pages.map((page, index) => ({
+      pageId: page.pageId,
+      url: page.url,
+      vector: vectors[index],
+    })),
+  );
 }

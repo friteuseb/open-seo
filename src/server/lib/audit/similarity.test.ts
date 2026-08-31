@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { findSimilarPagePairs } from "@/server/lib/audit/similarity";
+import {
+  findSimilarPagePairs,
+  findSimilarPagePairsFromVectors,
+} from "@/server/lib/audit/similarity";
 
 function page(pageId: string, terms: string[]) {
   return {
@@ -58,5 +61,31 @@ describe("findSimilarPagePairs", () => {
       { threshold: 0.3 },
     );
     expect(pairs).toEqual([]);
+  });
+});
+
+function embedded(pageId: string, vector: number[]) {
+  return { pageId, url: `https://example.com/${pageId}`, vector };
+}
+
+describe("findSimilarPagePairsFromVectors", () => {
+  it("pairs pages whose vectors point the same way, and drops the rest", () => {
+    const pairs = findSimilarPagePairsFromVectors([
+      embedded("toiture", [1, 0.9, 0.1]),
+      // Different vocabulary, same topic: TF-IDF would score these near zero.
+      embedded("couverture", [0.95, 1, 0.05]),
+      embedded("plomberie", [0.1, 0, 1]),
+    ]);
+
+    const ids = pairs.map((pair) => [pair.sourcePageId, pair.targetPageId]);
+    expect(ids).toContainEqual(["toiture", "couverture"]);
+    expect(ids).toContainEqual(["couverture", "toiture"]);
+    expect(
+      pairs.some(
+        (pair) =>
+          pair.sourcePageId === "plomberie" ||
+          pair.targetPageId === "plomberie",
+      ),
+    ).toBe(false);
   });
 });
