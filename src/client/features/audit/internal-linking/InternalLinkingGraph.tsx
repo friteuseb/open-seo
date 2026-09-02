@@ -167,7 +167,6 @@ export function InternalLinkingGraph({
         labelSelection.attr("font-size", 10 / Math.sqrt(event.transform.k));
       });
     svg.call(zoomBehavior);
-    zoomBehavior.transform(svg, zoomIdentity);
 
     const linkSelection = root
       .append("g")
@@ -260,6 +259,10 @@ export function InternalLinkingGraph({
       .attr("stroke-width", 3)
       .attr("stroke-linejoin", "round")
       .attr("opacity", (d) => (alwaysLabelled.has(d.id) ? 1 : 0));
+
+    // Only now that labelSelection exists: the zoom handler reads it, and
+    // transform() dispatches a zoom event synchronously.
+    zoomBehavior.transform(svg, zoomIdentity);
 
     const simulation = forceSimulation(simNodes)
       .force(
