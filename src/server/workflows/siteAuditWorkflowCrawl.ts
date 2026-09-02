@@ -1,4 +1,5 @@
 import type { WorkflowStep } from "cloudflare:workers";
+import { sort } from "remeda";
 import type { RobotsResult } from "@/server/lib/audit/discovery";
 import type { CrawledPageResult } from "@/server/lib/audit/types";
 import { isSameOrigin } from "@/server/lib/audit/url-utils";
@@ -309,8 +310,13 @@ async function persistCrawledPages(input: {
     const childDepth = pageDepth === null ? null : pageDepth + 1;
 
     let storedForPage = 0;
-    for (const link of page.links) {
-      if (!link.isInternal) continue;
+    // Body links first: on a mega-menu page the per-page cap would otherwise
+    // be spent on chrome, and the body links are what the graph is built from.
+    const internalLinks = sort(
+      page.links.filter((link) => link.isInternal),
+      (a, b) => Number(a.isBoilerplate) - Number(b.isBoilerplate),
+    );
+    for (const link of internalLinks) {
       if (storedForPage < MAX_STORED_LINKS_PER_PAGE) {
         storedForPage += 1;
         links.push({
@@ -319,6 +325,7 @@ async function persistCrawledPages(input: {
           targetUrl: link.targetUrl,
           anchor: link.anchor,
           isNofollow: link.isNofollow,
+          isBoilerplate: link.isBoilerplate,
         });
       }
       if (

@@ -4,13 +4,25 @@
  * replaced. Cheerio stays as a devDependency for this test only.
  */
 import * as cheerio from "cheerio";
+import { omit } from "remeda";
 import { describe, expect, it } from "vitest";
 import { analyzeHtml } from "@/server/lib/audit/page-analyzer";
 import { normalizeUrl, isSameOrigin } from "@/server/lib/audit/url-utils";
 import type { PageAnalysis, PageLink } from "@/server/lib/audit/types";
 
+/**
+ * Link placement postdates this reference, so its links carry every field but
+ * `isBoilerplate` — see expectParity.
+ */
+type ReferenceAnalysis = Omit<PageAnalysis, "links"> & {
+  links: Array<Omit<PageLink, "isBoilerplate">>;
+};
+
 /** The previous cheerio implementation, verbatim (minus passthrough fields). */
-function analyzeHtmlWithCheerio(html: string, pageUrl: string): PageAnalysis {
+function analyzeHtmlWithCheerio(
+  html: string,
+  pageUrl: string,
+): ReferenceAnalysis {
   const $ = cheerio.load(html);
 
   const title = $("title").first().text().trim();
@@ -55,7 +67,7 @@ function analyzeHtmlWithCheerio(html: string, pageUrl: string): PageAnalysis {
     });
   });
 
-  const linksByTarget = new Map<string, PageLink>();
+  const linksByTarget = new Map<string, Omit<PageLink, "isBoilerplate">>();
   $("a[href]").each((_, el) => {
     const href = $(el).attr("href");
     if (!href) return;
@@ -112,7 +124,12 @@ const PAGE_URL = "https://example.com/blog/post";
 function expectParity(html: string) {
   const streamed = analyzeHtml(html, PAGE_URL, 200, 0);
   const reference = analyzeHtmlWithCheerio(html, PAGE_URL);
-  expect(streamed).toEqual(reference);
+  // Link placement postdates the reference implementation and has its own
+  // tests below; parity is about what the DOM path used to emit.
+  expect({
+    ...streamed,
+    links: streamed.links.map((link) => omit(link, ["isBoilerplate"])),
+  }).toEqual(reference);
 }
 
 describe("analyzeHtml parity with the DOM reference", () => {
@@ -225,5 +242,94 @@ describe("analyzeHtml extraction caps", () => {
     );
     expect(analysis.links).toHaveLength(1_000);
     expect(analysis.images).toHaveLength(1_000);
+  });
+});
+
+describe("analyzeHtml link placement", () => {
+  function placementByPath(html: string) {
+    const analysis = analyzeHtml(html, "https://example.com/", 200, 0);
+    return new Map(
+      analysis.links.map((link) => [
+        new URL(link.targetUrl).pathname,
+        link.isBoilerplate,
+      ]),
+    );
+  }
+
+  it("reads chrome from landmarks and from class names", () => {
+    const placement = placementByPath(`<body>
+      <header><a href="/home">Home</a></header>
+      <nav><a href="/menu">Menu</a></nav>
+      <div class="site-footer"><a href="/legal">Legal</a></div>
+      <div id="sidebar-secondary"><a href="/widget">Widget</a></div>
+      <main><p><a href="/body">In the body</a></p></main>
+      <footer><a href="/contact">Contact</a></footer>
+    </body>`);
+    expect(placement.get("/body")).toBe(false);
+    for (const path of ["/home", "/menu", "/legal", "/widget", "/contact"]) {
+      expect(placement.get(path)).toBe(true);
+    }
+  });
+
+  it("ignores the state classes a CMS hangs on the body", () => {
+    // WordPress writes class="home ... fixed-nav menu-home" on <body>; reading
+    // that as a menu would classify the whole document as chrome.
+    const placement = placementByPath(`<body class="home fixed-nav menu-home">
+      <p><a href="/body">In the body</a></p>
+    </body>`);
+    expect(placement.get("/body")).toBe(false);
+  });
+
+  it("keeps a card's header inside main as content", () => {
+    const placement = placementByPath(`<body>
+      <header class="site-header"><a href="/home">Home</a></header>
+      <main>
+        <div class="item">
+          <header class="entry-header"><a href="/post">A post</a></header>
+        </div>
+      </main>
+    </body>`);
+    expect(placement.get("/home")).toBe(true);
+    expect(placement.get("/post")).toBe(false);
+  });
+
+  it("keeps an article's own header and footer as content", () => {
+    const placement = placementByPath(`<body>
+      <article>
+        <header><a href="/author">By the author</a></header>
+        <p><a href="/related">Related</a></p>
+        <footer><a href="/tag">Tagged</a></footer>
+      </article>
+    </body>`);
+    expect(placement.get("/author")).toBe(false);
+    expect(placement.get("/related")).toBe(false);
+    expect(placement.get("/tag")).toBe(false);
+  });
+
+  it("leaves chrome when a plain element inside it closes", () => {
+    const placement = placementByPath(`<body>
+      <div class="main-navigation"><div><a href="/menu">Menu</a></div></div>
+      <p><a href="/body">In the body</a></p>
+    </body>`);
+    expect(placement.get("/menu")).toBe(true);
+    expect(placement.get("/body")).toBe(false);
+  });
+
+  it("prefers the body copy of a target the menu also links", () => {
+    const analysis = analyzeHtml(
+      `<body>
+        <nav><a href="/pricing">Pricing</a></nav>
+        <p><a href="/pricing">see our plans</a></p>
+      </body>`,
+      "https://example.com/",
+      200,
+      0,
+    );
+    expect(analysis.links).toEqual([
+      expect.objectContaining({
+        anchor: "see our plans",
+        isBoilerplate: false,
+      }),
+    ]);
   });
 });

@@ -12,6 +12,7 @@
  */
 import { Parser } from "htmlparser2";
 import { normalizeUrl, isSameOrigin } from "./url-utils";
+import { isBoilerplateContainer, isContentScopeTag } from "./link-placement";
 import type { PageAnalysis, PageLink } from "./types";
 
 const SKIPPED_LINK_PROTOCOLS = /^(javascript:|mailto:|tel:|#)/;
@@ -40,6 +41,8 @@ interface OpenAnchor {
   href: string;
   rel: string;
   text: string[];
+  /** Whether the anchor opened inside navigation chrome (see link-placement). */
+  isBoilerplate: boolean;
 }
 
 /**
@@ -74,6 +77,12 @@ export function analyzeHtml(
   const images: Array<{ src: string | null; alt: string | null }> = [];
   const linksByTarget = new Map<string, PageLink>();
   let openAnchor: OpenAnchor | null = null;
+
+  // Chrome tracking: element depth so a plain `</div>` can't close the menu
+  // `<div>` that wraps it, and the depths at which chrome subtrees opened.
+  let elementDepth = 0;
+  let contentScopeDepth = 0;
+  const boilerplateDepths: number[] = [];
 
   // Visible text: prefer text inside an explicit <body>; when the document
   // never opens one (fragments), fall back to all non-head text. Both
@@ -110,11 +119,17 @@ export function analyzeHtml(
 
   const closeAnchor = () => {
     if (!openAnchor) return;
-    const { href, rel, text } = openAnchor;
+    const { href, rel, text, isBoilerplate } = openAnchor;
     openAnchor = null;
-    if (linksByTarget.size >= MAX_EXTRACTED_LINKS) return;
     const resolved = normalizeUrl(href, pageUrl);
-    if (!resolved || linksByTarget.has(resolved)) return;
+    if (!resolved) return;
+    const existing = linksByTarget.get(resolved);
+    // Links dedupe by target, and the menu is emitted before the body — so a
+    // page whose content links to a target already in the nav would otherwise
+    // keep only the nav copy and lose the editorial link. Content wins, and
+    // that upgrade is exempt from the cap since it adds no entry.
+    if (existing && (isBoilerplate || !existing.isBoilerplate)) return;
+    if (!existing && linksByTarget.size >= MAX_EXTRACTED_LINKS) return;
     const anchor = text
       .join("")
       .replace(/\s+/g, " ")
@@ -125,6 +140,7 @@ export function analyzeHtml(
       anchor: anchor || null,
       isInternal: isSameOrigin(resolved, pageUrl),
       isNofollow: rel.split(/\s+/).includes("nofollow"),
+      isBoilerplate,
     });
   };
 
@@ -136,6 +152,11 @@ export function analyzeHtml(
         }
         if (name === "noscript") noscriptDepth += 1;
         if (noscriptDepth > 0) return;
+        elementDepth += 1;
+        if (isContentScopeTag(name)) contentScopeDepth += 1;
+        if (isBoilerplateContainer(name, attribs, contentScopeDepth)) {
+          boilerplateDepths.push(elementDepth);
+        }
         switch (name) {
           case "title":
             // Ignore <title> inside <svg> — only the document title counts.
@@ -180,6 +201,7 @@ export function analyzeHtml(
                 href,
                 rel: attribs["rel"]?.toLowerCase() ?? "",
                 text: [],
+                isBoilerplate: boilerplateDepths.length > 0,
               };
             }
             break;
@@ -214,6 +236,13 @@ export function analyzeHtml(
           return;
         }
         if (noscriptDepth > 0) return;
+        if (boilerplateDepths[boilerplateDepths.length - 1] === elementDepth) {
+          boilerplateDepths.pop();
+        }
+        if (isContentScopeTag(name) && contentScopeDepth > 0) {
+          contentScopeDepth -= 1;
+        }
+        if (elementDepth > 0) elementDepth -= 1;
         if (name === "title" && titleDepth > 0) {
           titleDepth -= 1;
           if (titleDepth === 0) titleDone = true;

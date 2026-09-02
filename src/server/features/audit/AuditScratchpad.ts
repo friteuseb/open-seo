@@ -64,6 +64,8 @@ export interface ScratchpadLinkRow {
   targetUrl: string;
   anchor: string | null;
   isNofollow: boolean;
+  /** Link sits in navigation chrome rather than the page body. */
+  isBoilerplate: boolean;
 }
 
 interface RecordBatchInput {
@@ -98,14 +100,19 @@ interface SimilarityCandidate {
 interface LinkGraphAnalysis {
   /** null when the crawl's link storage budget was exceeded (see recordBatch) — the edge set is incomplete, so metrics would be misleading. */
   pageMetrics: PageLinkMetrics[] | null;
-  /** `candidates` filtered down to pairs with no existing edge between them. */
+  /** `candidates` filtered down to pairs with no body link between them. */
   missingLinkPairs: SimilarityCandidate[];
   /**
    * The crawl's actual internal links, so the app DB can keep them after this
    * Durable Object is cleaned up. Capped: past LINK_EDGE_CAP the graph is
-   * unreadable anyway, and the rows stop earning their storage.
+   * unreadable anyway, and the rows stop earning their storage. Body links
+   * fill the cap first — they are what the graph is for.
    */
-  edges: Array<{ sourcePageId: string; targetPageId: string }>;
+  edges: Array<{
+    sourcePageId: string;
+    targetPageId: string;
+    isBoilerplate: boolean;
+  }>;
 }
 
 const BROKEN_LINK_ISSUE_CAP = 2_000;
@@ -120,6 +127,15 @@ const CLEANUP_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
  * budget the crawl continues — the audit just loses link-graph issues.
  */
 const LINK_STORAGE_BUDGET_BYTES = 500 * 1024 * 1024;
+/**
+ * A target linked from at least this share of the crawled pages is template
+ * chrome whatever its markup says — plenty of sites still build menus out of
+ * unlabelled `<div>`s that link-placement.ts cannot recognise. Deliberately
+ * high, and only applied past MIN_PAGES_FOR_SITEWIDE_LINKS: on a ten-page site
+ * a genuinely well cross-linked body would trip a lower threshold.
+ */
+const SITEWIDE_LINK_PAGE_SHARE = 0.6;
+const MIN_PAGES_FOR_SITEWIDE_LINKS = 20;
 
 export class AuditScratchpad extends DurableObject {
   constructor(ctx: DurableObjectState, workerEnv: Env) {
@@ -140,6 +156,7 @@ export class AuditScratchpad extends DurableObject {
         target_url TEXT NOT NULL,
         anchor TEXT,
         is_nofollow INTEGER NOT NULL DEFAULT 0,
+        is_boilerplate INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (source_page_id, target_url)
       );
       CREATE INDEX IF NOT EXISTS links_target_idx ON links (target_url);
@@ -152,6 +169,16 @@ export class AuditScratchpad extends DurableObject {
       );
       CREATE INDEX IF NOT EXISTS page_mirror_redirect_idx ON page_mirror (redirect_url);
     `);
+    // An audit already crawling when this column shipped has the older table;
+    // CREATE TABLE IF NOT EXISTS leaves it alone, and its next recordBatch
+    // would fail. Adding the column throws once it exists, which is the check.
+    try {
+      this.ctx.storage.sql.exec(
+        `ALTER TABLE links ADD COLUMN is_boilerplate INTEGER NOT NULL DEFAULT 0`,
+      );
+    } catch {
+      // Already migrated.
+    }
     // Guarantee the cleanup alarm on EVERY instantiation, not just at seed:
     // any RPC (even one racing in right after destroy()) re-creates the
     // tables above, and without an alarm that storage would leak forever.
@@ -245,13 +272,14 @@ export class AuditScratchpad extends DurableObject {
     if (this.ctx.storage.sql.databaseSize < LINK_STORAGE_BUDGET_BYTES) {
       for (const link of input.links) {
         this.ctx.storage.sql.exec(
-          `INSERT OR IGNORE INTO links (source_page_id, source_url, target_url, anchor, is_nofollow)
-           VALUES (?, ?, ?, ?, ?)`,
+          `INSERT OR IGNORE INTO links (source_page_id, source_url, target_url, anchor, is_nofollow, is_boilerplate)
+           VALUES (?, ?, ?, ?, ?, ?)`,
           link.sourcePageId,
           link.sourceUrl,
           link.targetUrl,
           link.anchor,
           link.isNofollow ? 1 : 0,
+          link.isBoilerplate ? 1 : 0,
         );
       }
     }
@@ -345,11 +373,39 @@ export class AuditScratchpad extends DurableObject {
   }
 
   /**
-   * Internal-linking graph analysis: PageRank/centrality/inbound counts over
-   * the full internal-link edge set, plus which similarity `candidates`
-   * (computed outside the DO, from persisted page keywords) have no
-   * existing link between them yet. Like runFinalizeChecks, this must run
-   * before destroy() — it's the only place the edge list exists.
+   * Flags every link to a target that most of the site links to as chrome.
+   *
+   * The per-page classifier reads markup, so it misses menus built from
+   * unlabelled `<div>`s. Repetition catches those: a target reachable from
+   * 60% of the site is in the template, not in someone's prose.
+   */
+  private markSitewideLinks(): void {
+    const { pages } = this.ctx.storage.sql
+      .exec<{ pages: number }>(`SELECT COUNT(*) AS pages FROM page_mirror`)
+      .one();
+    if (pages < MIN_PAGES_FOR_SITEWIDE_LINKS) return;
+
+    this.ctx.storage.sql.exec(
+      `UPDATE links SET is_boilerplate = 1
+       WHERE is_boilerplate = 0 AND target_url IN (
+         SELECT target_url FROM links
+         GROUP BY target_url
+         HAVING COUNT(DISTINCT source_page_id) >= ?
+       )`,
+      Math.ceil(pages * SITEWIDE_LINK_PAGE_SHARE),
+    );
+  }
+
+  /**
+   * Internal-linking graph analysis: PageRank/centrality/inbound counts, plus
+   * which similarity `candidates` (computed outside the DO, from persisted
+   * page keywords) have no link between them yet. Like runFinalizeChecks,
+   * this must run before destroy() — it's the only place the edges exist.
+   *
+   * Metrics and suggestions read body links only. A menu links every page to
+   * every other one, which flattens PageRank towards uniform and makes every
+   * pair look already linked; the chrome edges are still returned, so the
+   * graph can draw them on request.
    */
   async computeLinkGraphAnalysis(input: {
     candidates: SimilarityCandidate[];
@@ -360,33 +416,43 @@ export class AuditScratchpad extends DurableObject {
       return { pageMetrics: null, missingLinkPairs: [], edges: [] };
     }
 
+    this.markSitewideLinks();
+
     const nodeIds = this.ctx.storage.sql
       .exec<{ page_id: string }>(`SELECT page_id FROM page_mirror`)
       .toArray()
       .map((row) => row.page_id);
 
+    // Body links first, so they fill LINK_EDGE_CAP before the chrome does.
     const edges = this.ctx.storage.sql
       .exec<{
         source_page_id: string;
         target_page_id: string;
+        is_boilerplate: number;
       }>(
-        `SELECT l.source_page_id, m.page_id AS target_page_id
-         FROM links l JOIN page_mirror m ON m.url = l.target_url`,
+        `SELECT l.source_page_id, m.page_id AS target_page_id, l.is_boilerplate
+         FROM links l JOIN page_mirror m ON m.url = l.target_url
+         ORDER BY l.is_boilerplate`,
       )
       .toArray()
       .map((row) => ({
         sourcePageId: row.source_page_id,
         targetPageId: row.target_page_id,
+        isBoilerplate: row.is_boilerplate === 1,
       }));
 
-    const { pageMetrics } = computeLinkGraphMetrics(nodeIds, edges);
+    const { pageMetrics } = computeLinkGraphMetrics(
+      nodeIds,
+      edges.filter((edge) => !edge.isBoilerplate),
+    );
 
     const missingLinkPairs = input.candidates.filter((candidate) => {
       const existing = this.ctx.storage.sql
         .exec<{
           n: number;
         }>(
-          `SELECT COUNT(*) AS n FROM links WHERE source_page_id = ? AND target_url = ?`,
+          `SELECT COUNT(*) AS n FROM links
+           WHERE source_page_id = ? AND target_url = ? AND is_boilerplate = 0`,
           candidate.sourcePageId,
           candidate.targetUrl,
         )
