@@ -103,6 +103,33 @@ describe("assignPageThemes without embeddings", () => {
     expect(themes.every((t) => t.themeLabel.length > 0)).toBe(true);
   });
 
+  it("does not name a cluster after the site's own vocabulary", () => {
+    // "papy" is on every page (the brand); only the subject words separate
+    // one cluster from the other.
+    const pages = [
+      page("p1", [
+        ["papy", 9],
+        ["tomates", 8],
+      ]),
+      page("p2", [
+        ["papy", 9],
+        ["tomates", 7],
+      ]),
+      page("p3", [
+        ["papy", 9],
+        ["mentions", 8],
+      ]),
+      page("p4", [
+        ["papy", 9],
+        ["mentions", 7],
+      ]),
+    ];
+
+    const labels = assignPageThemes(pages, null).map((t) => t.themeLabel);
+
+    expect(labels.every((label) => !label.includes("papy"))).toBe(true);
+  });
+
   it("returns nothing for an audit with no pages", () => {
     expect(assignPageThemes([], null)).toEqual([]);
   });

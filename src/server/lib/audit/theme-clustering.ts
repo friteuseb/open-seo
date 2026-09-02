@@ -34,6 +34,13 @@ const MAX_CLUSTERS = 10;
 const MAX_ITERATIONS = 20;
 /** Terms joined into one label, e.g. "tomates · semis". */
 const TERMS_PER_LABEL = 2;
+/**
+ * A term on more than this share of the audit's pages is the site's own
+ * vocabulary — its brand, its tagline — not a subject that tells two clusters
+ * apart. Naming a cluster after it says nothing ("papy · potager" on a site
+ * called Papy Potager).
+ */
+const MAX_DOCUMENT_RATIO = 0.4;
 
 /**
  * Roughly one cluster per 60 pages, bounded. Enough separation to be useful
@@ -177,6 +184,7 @@ function labelClusters(
   clusterCount: number,
 ): string[] {
   const globalWeight = new Map<string, number>();
+  const documentCount = new Map<string, number>();
   const clusterWeights = Array.from(
     { length: clusterCount },
     () => new Map<string, number>(),
@@ -185,20 +193,26 @@ function labelClusters(
   for (let i = 0; i < pages.length; i++) {
     for (const { term, weight } of pages[i].keywords) {
       globalWeight.set(term, (globalWeight.get(term) ?? 0) + weight);
+      documentCount.set(term, (documentCount.get(term) ?? 0) + 1);
       const bucket = clusterWeights[assignments[i]];
       bucket.set(term, (bucket.get(term) ?? 0) + weight);
     }
   }
 
+  const isSiteVocabulary = (term: string) =>
+    (documentCount.get(term) ?? 0) / pages.length > MAX_DOCUMENT_RATIO;
+
   const used = new Set<string>();
   return clusterWeights.map((weights, cluster) => {
     const ranked = sort(
-      Array.from(weights.entries()).map(([term, weight]) => ({
-        term,
-        // Share of the term's site-wide weight that this cluster holds.
-        distinctiveness: weight / (globalWeight.get(term) ?? weight),
-        weight,
-      })),
+      Array.from(weights.entries())
+        .filter(([term]) => !isSiteVocabulary(term))
+        .map(([term, weight]) => ({
+          term,
+          // Share of the term's site-wide weight that this cluster holds.
+          distinctiveness: weight / (globalWeight.get(term) ?? weight),
+          weight,
+        })),
       (a, b) =>
         b.distinctiveness * b.weight - a.distinctiveness * a.weight ||
         a.term.localeCompare(b.term),
