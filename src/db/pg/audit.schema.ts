@@ -136,8 +136,21 @@ export const auditPages = pgTable(
   (table) => [index("audit_pages_audit_url_idx").on(table.auditId, table.url)],
 );
 
-// Link edges live in the per-audit AuditScratchpad Durable Object for the
-// duration of the crawl; they are never persisted to the app DB.
+// Link edges are collected in the per-audit AuditScratchpad Durable Object
+// during the crawl, then copied here at finalize so the internal-linking graph
+// survives the Durable Object's cleanup. Capped (see LINK_EDGE_CAP).
+export const auditLinks = pgTable(
+  "audit_links",
+  {
+    id: text("id").primaryKey(),
+    auditId: text("audit_id")
+      .notNull()
+      .references(() => audits.id, { onDelete: "cascade" }),
+    sourcePageId: text("source_page_id").notNull(),
+    targetPageId: text("target_page_id").notNull(),
+  },
+  (table) => [index("audit_links_audit_idx").on(table.auditId)],
+);
 
 // One row per (issue type, affected page)
 export const auditIssues = pgTable(

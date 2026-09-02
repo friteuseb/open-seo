@@ -26,9 +26,17 @@ export interface GraphNode extends SimulationNodeDatum {
 }
 
 export interface GraphEdge extends SimulationLinkDatum<GraphNode> {
-  kind: "broken" | "suggested";
+  /** "internal" is a link the crawl actually found; the others are findings. */
+  kind: "internal" | "broken" | "suggested";
   score?: number;
 }
+
+/**
+ * "links" lays the graph out on its link forces alone — the real shape of the
+ * internal linking. "topics" adds a pull towards each cluster's centre, which
+ * separates the subjects at the cost of distorting that shape.
+ */
+export type GraphLayout = "links" | "topics";
 
 const NODE_RADIUS_RANGE: [number, number] = [6, 24];
 const CHARGE_STRENGTH = -260;
@@ -115,11 +123,13 @@ function resolvedNode(
 export function InternalLinkingGraph({
   nodes,
   edges,
+  layout,
   onNodeClick,
   onNodeHide,
 }: {
   nodes: GraphNode[];
   edges: GraphEdge[];
+  layout: GraphLayout;
   onNodeClick: (node: GraphNode) => void;
   /** Right-click hides a node, to clear the view around what is being read. */
   onNodeHide: (node: GraphNode) => void;
@@ -174,11 +184,17 @@ export function InternalLinkingGraph({
       .selectAll("line")
       .data(simEdges)
       .join("line")
+      // Real links are the substance and there are thousands of them, so they
+      // stay thin and quiet; findings are few and must stand out against them.
       .attr("class", (d) =>
-        d.kind === "broken" ? "stroke-error/70" : "stroke-info/60",
+        d.kind === "broken"
+          ? "stroke-error/70"
+          : d.kind === "suggested"
+            ? "stroke-info/60"
+            : "stroke-base-content/25",
       )
-      .attr("stroke-width", 1.5)
-      .attr("stroke-dasharray", "4 3");
+      .attr("stroke-width", (d) => (d.kind === "internal" ? 0.6 : 1.5))
+      .attr("stroke-dasharray", (d) => (d.kind === "internal" ? null : "4 3"));
 
     const dragBehavior = drag<SVGCircleElement, GraphNode>()
       .on(
@@ -278,7 +294,7 @@ export function InternalLinkingGraph({
         forceCollide<GraphNode>((d) => radiusScale(d.inboundLinkCount) + 8),
       );
 
-    if (simNodes.some((node) => node.themeId != null)) {
+    if (layout === "topics" && simNodes.some((node) => node.themeId != null)) {
       simulation.force("cluster", forceCluster(simNodes, CLUSTER_STRENGTH));
     }
 
@@ -297,7 +313,7 @@ export function InternalLinkingGraph({
     return () => {
       simulation.stop();
     };
-  }, [nodes, edges, onNodeClick, onNodeHide]);
+  }, [nodes, edges, layout, onNodeClick, onNodeHide]);
 
   if (nodes.length === 0) {
     return (

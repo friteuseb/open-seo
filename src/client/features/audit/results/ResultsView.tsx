@@ -31,7 +31,7 @@ export function ResultsView({
   tab: string;
   onTabChange: (tab: ResultsTab) => void;
 }) {
-  const { audit, pages, lighthouse, issues } = data;
+  const { audit, pages, lighthouse, issues, links } = data;
   const hasPerformanceTab = lighthouse.length > 0;
   const activeTab =
     tab === "performance" && !hasPerformanceTab ? "issues" : tab;
@@ -126,7 +126,7 @@ export function ResultsView({
             />
           )}
           {activeTab === "internal-linking" && (
-            <InternalLinkingView pages={pages} issues={issues} />
+            <InternalLinkingView pages={pages} issues={issues} links={links} />
           )}
         </div>
       </div>

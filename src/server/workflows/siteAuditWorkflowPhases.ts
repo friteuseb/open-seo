@@ -440,13 +440,17 @@ async function runInternalLinkingAnalysis(
     await LinkGraphRepository.updatePageThemes(auditId, themes);
   }
 
-  const { pageMetrics, missingLinkPairs } = await getAuditScratchpad(
+  const { pageMetrics, missingLinkPairs, edges } = await getAuditScratchpad(
     auditId,
   ).computeLinkGraphAnalysis({ candidates: candidatePairs });
 
   if (pageMetrics) {
     await LinkGraphRepository.updateLinkGraphMetrics(auditId, pageMetrics);
   }
+  // The scratchpad DO is wiped after the audit; without this the crawl's own
+  // link graph — the thing the internal-linking view exists to show — would be
+  // lost, leaving only broken links and suggestions to draw.
+  await LinkGraphRepository.replaceLinks(auditId, edges);
 
   return missingLinkPairs.map((pair) => ({
     issueType: "internal-linking-opportunity" as const,

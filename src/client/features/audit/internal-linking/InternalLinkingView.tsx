@@ -11,10 +11,12 @@ import {
   InternalLinkingGraph,
   themeColorForId,
   type GraphEdge,
+  type GraphLayout,
   type GraphNode,
 } from "@/client/features/audit/internal-linking/InternalLinkingGraph";
 
 type AuditPage = AuditResultsData["pages"][number];
+type AuditLink = AuditResultsData["links"][number];
 type AuditIssue = AuditResultsData["issues"][number];
 
 interface LinkSuggestionDetails {
@@ -118,11 +120,17 @@ function ThemeLegend({ nodes }: { nodes: GraphNode[] }) {
 export function InternalLinkingView({
   pages,
   issues,
+  links,
 }: {
   pages: AuditPage[];
   issues: AuditIssue[];
+  links: AuditLink[];
 }) {
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
+  // The graph is first about how pages link to each other; topics are a
+  // reading of that, not a replacement for it. "links" keeps the layout
+  // driven purely by the link forces, "topics" pulls each cluster together.
+  const [layout, setLayout] = useState<GraphLayout>("links");
   // Right-click hides a page so a dense graph can be read. Hidden, not
   // dropped: the audit's data is untouched and one click brings them back.
   const [hiddenUrls, setHiddenUrls] = useState<ReadonlySet<string>>(
@@ -195,6 +203,13 @@ export function InternalLinkingView({
     }));
 
     const graphEdges: GraphEdge[] = [];
+    const pageUrlById = new Map(pages.map((page) => [page.id, page.url]));
+    for (const link of links) {
+      const source = pageUrlById.get(link.sourcePageId);
+      const target = pageUrlById.get(link.targetPageId);
+      if (!source || !target || source === target) continue;
+      graphEdges.push({ source, target, kind: "internal" });
+    }
     for (const { issue, details } of brokenLinks) {
       if (!pagesByUrl.has(issue.pageUrl) || !pagesByUrl.has(details.targetUrl))
         continue;
@@ -216,7 +231,12 @@ export function InternalLinkingView({
     }
 
     return { nodes: graphNodes, edges: graphEdges };
-  }, [pages, pagesByUrl, brokenLinks, suggestions]);
+  }, [pages, pagesByUrl, brokenLinks, suggestions, links]);
+
+  const internalEdgeCount = useMemo(
+    () => edges.filter((edge) => edge.kind === "internal").length,
+    [edges],
+  );
 
   // An edge to a hidden page would dangle, so both ends must still be visible.
   const { visibleNodes, visibleEdges } = useMemo(() => {
@@ -255,9 +275,32 @@ export function InternalLinkingView({
         suggestionCount={suggestions.length}
       />
 
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div role="tablist" className="tabs tabs-boxed tabs-sm">
+          <button
+            role="tab"
+            className={`tab ${layout === "links" ? "tab-active" : ""}`}
+            onClick={() => setLayout("links")}
+          >
+            Link graph
+          </button>
+          <button
+            role="tab"
+            className={`tab ${layout === "topics" ? "tab-active" : ""}`}
+            onClick={() => setLayout("topics")}
+          >
+            Grouped by topic
+          </button>
+        </div>
+        <span className="text-xs text-base-content/50">
+          {internalEdgeCount.toLocaleString()} internal links
+        </span>
+      </div>
+
       <InternalLinkingGraph
         nodes={visibleNodes}
         edges={visibleEdges}
+        layout={layout}
         onNodeClick={setSelectedNode}
         onNodeHide={hideNode}
       />

@@ -86,6 +86,7 @@ export const {
   projectResearchLog,
   audits,
   auditPages,
+  auditLinks,
   auditIssues,
   auditLighthouseResults,
   samSessions,

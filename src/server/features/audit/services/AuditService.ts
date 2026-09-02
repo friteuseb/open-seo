@@ -169,7 +169,7 @@ async function getStatus(auditId: string, projectId: string) {
 }
 
 async function getResults(auditId: string, projectId: string) {
-  const { audit, pages, lighthouse, issues } =
+  const { audit, pages, lighthouse, issues, links } =
     await AuditRepository.getAuditResultsForProject(auditId, projectId);
 
   if (!audit) throw new AppError("NOT_FOUND");
@@ -193,6 +193,7 @@ async function getResults(auditId: string, projectId: string) {
     pages,
     lighthouse,
     issues,
+    links,
   };
 }
 

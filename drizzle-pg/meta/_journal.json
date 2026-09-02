@@ -176,6 +176,13 @@
       "when": 1788340036105,
       "tag": "0024_puzzling_corsair",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1788348887153,
+      "tag": "0025_sudden_stephen_strange",
+      "breakpoints": true
     }
   ]
 }

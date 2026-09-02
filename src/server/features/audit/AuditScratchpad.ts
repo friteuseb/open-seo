@@ -100,9 +100,17 @@ interface LinkGraphAnalysis {
   pageMetrics: PageLinkMetrics[] | null;
   /** `candidates` filtered down to pairs with no existing edge between them. */
   missingLinkPairs: SimilarityCandidate[];
+  /**
+   * The crawl's actual internal links, so the app DB can keep them after this
+   * Durable Object is cleaned up. Capped: past LINK_EDGE_CAP the graph is
+   * unreadable anyway, and the rows stop earning their storage.
+   */
+  edges: Array<{ sourcePageId: string; targetPageId: string }>;
 }
 
 const BROKEN_LINK_ISSUE_CAP = 2_000;
+/** Edges kept for the internal-linking graph. ~15 per page on a typical site. */
+const LINK_EDGE_CAP = 20_000;
 const CLEANUP_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
 /**
  * Stop storing link edges once the database reaches this size. Link rows are
@@ -349,7 +357,7 @@ export class AuditScratchpad extends DurableObject {
     const linkGraphComplete =
       this.ctx.storage.sql.databaseSize < LINK_STORAGE_BUDGET_BYTES;
     if (!linkGraphComplete) {
-      return { pageMetrics: null, missingLinkPairs: [] };
+      return { pageMetrics: null, missingLinkPairs: [], edges: [] };
     }
 
     const nodeIds = this.ctx.storage.sql
@@ -386,7 +394,11 @@ export class AuditScratchpad extends DurableObject {
       return existing.n === 0;
     });
 
-    return { pageMetrics, missingLinkPairs };
+    return {
+      pageMetrics,
+      missingLinkPairs,
+      edges: edges.slice(0, LINK_EDGE_CAP),
+    };
   }
 
   /** Wipe all state (success path, or explicit audit deletion). */

@@ -6,7 +6,7 @@
  */
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db";
-import { auditPages } from "@/db/schema";
+import { auditLinks, auditPages } from "@/db/schema";
 import { executeInBatches } from "@/db/runBatch";
 import type { PageKeyword } from "@/server/lib/audit/keyword-extraction";
 
@@ -90,8 +90,45 @@ async function updatePageThemes(
   );
 }
 
+/**
+ * Replaces the audit's link edges with the set the crawl found.
+ *
+ * Delete-then-insert rather than deterministic ids: this runs once at finalize
+ * inside a retryable Workflow step, so wiping first makes a re-run land on the
+ * same rows instead of doubling them.
+ */
+async function replaceLinks(
+  auditId: string,
+  edges: Array<{ sourcePageId: string; targetPageId: string }>,
+) {
+  await db.delete(auditLinks).where(eq(auditLinks.auditId, auditId));
+  if (edges.length === 0) return;
+
+  await executeInBatches(edges, (tx, edge) =>
+    tx.insert(auditLinks).values({
+      id: crypto.randomUUID(),
+      auditId,
+      sourcePageId: edge.sourcePageId,
+      targetPageId: edge.targetPageId,
+    }),
+  );
+}
+
+/** The audit's internal links, for the internal-linking graph. */
+async function getLinks(auditId: string) {
+  return db
+    .select({
+      sourcePageId: auditLinks.sourcePageId,
+      targetPageId: auditLinks.targetPageId,
+    })
+    .from(auditLinks)
+    .where(eq(auditLinks.auditId, auditId));
+}
+
 export const LinkGraphRepository = {
   getPagesForSimilarity,
   updateLinkGraphMetrics,
   updatePageThemes,
+  replaceLinks,
+  getLinks,
 } as const;

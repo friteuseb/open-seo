@@ -13,6 +13,7 @@ import {
   auditPages,
   projects,
 } from "@/db/schema";
+import { LinkGraphRepository } from "@/server/features/audit/repositories/LinkGraphRepository";
 import { executeInBatches } from "@/db/runBatch";
 import { AUDIT_ISSUE_TYPES } from "@/shared/audit-issues";
 import { deterministicAuditRowId } from "@/server/lib/audit/ids";
@@ -368,10 +369,10 @@ async function getAuditUsageForOrganization(organizationId: string) {
 async function getAuditResultsForProject(auditId: string, projectId: string) {
   const audit = await getAuditForProject(auditId, projectId);
   if (!audit) {
-    return { audit: null, pages: [], lighthouse: [], issues: [] };
+    return { audit: null, pages: [], lighthouse: [], issues: [], links: [] };
   }
 
-  const [pages, lighthouse, issues] = await Promise.all([
+  const [pages, lighthouse, issues, links] = await Promise.all([
     db.query.auditPages.findMany({
       where: eq(auditPages.auditId, auditId),
       // keywordsJson exists for the finalize-time similarity pass only. It is
@@ -385,9 +386,10 @@ async function getAuditResultsForProject(auditId: string, projectId: string) {
     db.query.auditIssues.findMany({
       where: eq(auditIssues.auditId, auditId),
     }),
+    LinkGraphRepository.getLinks(auditId),
   ]);
 
-  return { audit, pages, lighthouse, issues };
+  return { audit, pages, lighthouse, issues, links };
 }
 
 async function getLighthouseResultById(input: {
