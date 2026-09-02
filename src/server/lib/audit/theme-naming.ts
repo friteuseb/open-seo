@@ -144,32 +144,107 @@ export async function nameThemeClusters(
  * vocabulary; a name describes its subject. Falls back silently to the labels
  * it was given.
  */
-export async function withModelNamedThemes<
-  T extends { pageId: string; themeId: number; themeLabel: string },
->(themes: T[], pages: Array<{ pageId: string; title: string | null }>) {
-  const titlesByPage = new Map(pages.map((page) => [page.pageId, page.title]));
-  const byTheme = new Map<number, ClusterToName>();
+type NamedTheme = {
+  pageId: string;
+  themeId: number;
+  themeLabel: string;
+  subThemeId: number | null;
+  subThemeLabel: string | null;
+};
 
-  for (const theme of themes) {
-    const cluster = byTheme.get(theme.themeId) ?? {
-      themeId: theme.themeId,
-      keywordLabel: theme.themeLabel,
-      pageTitles: [],
-    };
-    const title = titlesByPage.get(theme.pageId);
+/**
+ * Groups pages into clusters to name, keyed by whatever identifies a cluster
+ * at that level. Sub-clusters are numbered per theme, so they are keyed by
+ * "theme:sub" and given a call-scoped id.
+ */
+function collectClusters<T>(
+  rows: T[],
+  keyOf: (row: T) => string | null,
+  labelOf: (row: T) => string,
+  titleOf: (row: T) => string | null,
+) {
+  const byKey = new Map<string, ClusterToName>();
+  const keyById = new Map<number, string>();
+
+  for (const row of rows) {
+    const key = keyOf(row);
+    if (key == null) continue;
+    let cluster = byKey.get(key);
+    if (!cluster) {
+      const themeId = byKey.size;
+      cluster = { themeId, keywordLabel: labelOf(row), pageTitles: [] };
+      byKey.set(key, cluster);
+      keyById.set(themeId, key);
+    }
+    const title = titleOf(row);
     // Only the first few titles are sent, so stop collecting once there are
     // enough: a 200-page cluster would otherwise build a 200-entry array.
     if (title && cluster.pageTitles.length < TITLES_PER_CLUSTER) {
       cluster.pageTitles.push(title);
     }
-    byTheme.set(theme.themeId, cluster);
   }
 
-  const named = await nameThemeClusters(Array.from(byTheme.values()));
-  if (!named) return themes;
+  return { clusters: Array.from(byKey.values()), keyById };
+}
+
+/** Maps each cluster key to the model's name for it, or null if it declined. */
+async function nameByKey<T>(
+  rows: T[],
+  keyOf: (row: T) => string | null,
+  labelOf: (row: T) => string,
+  titleOf: (row: T) => string | null,
+): Promise<Map<string, string> | null> {
+  const { clusters, keyById } = collectClusters(rows, keyOf, labelOf, titleOf);
+  const named = await nameThemeClusters(clusters);
+  if (!named) return null;
+
+  const byKey = new Map<string, string>();
+  for (const [id, label] of named) {
+    const key = keyById.get(id);
+    if (key != null) byKey.set(key, label);
+  }
+  return byKey;
+}
+
+/**
+ * Replaces each cluster's keyword label with a model-written topic name, when
+ * the deployment configured one. The keyword label describes a cluster's
+ * vocabulary; a name describes its subject. Falls back silently to the labels
+ * it was given.
+ *
+ * Sub-clusters are named in a second pass so the drill-down reads like the
+ * level above it, rather than dropping back to raw keywords.
+ */
+export async function withModelNamedThemes<T extends NamedTheme>(
+  themes: T[],
+  pages: Array<{ pageId: string; title: string | null }>,
+) {
+  const titlesByPage = new Map(pages.map((page) => [page.pageId, page.title]));
+  const titleOf = (theme: T) => titlesByPage.get(theme.pageId) ?? null;
+
+  const themeNames = await nameByKey(
+    themes,
+    (theme) => String(theme.themeId),
+    (theme) => theme.themeLabel,
+    titleOf,
+  );
+  if (!themeNames) return themes;
+
+  const subNames = await nameByKey(
+    themes,
+    (theme) =>
+      theme.subThemeId == null ? null : `${theme.themeId}:${theme.subThemeId}`,
+    (theme) => theme.subThemeLabel ?? "",
+    titleOf,
+  );
 
   return themes.map((theme) => ({
     ...theme,
-    themeLabel: named.get(theme.themeId) ?? theme.themeLabel,
+    themeLabel: themeNames.get(String(theme.themeId)) ?? theme.themeLabel,
+    subThemeLabel:
+      theme.subThemeId == null
+        ? theme.subThemeLabel
+        : (subNames?.get(`${theme.themeId}:${theme.subThemeId}`) ??
+          theme.subThemeLabel),
   }));
 }
