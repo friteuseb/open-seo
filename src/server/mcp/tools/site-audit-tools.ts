@@ -46,7 +46,14 @@ function auditPath(projectId: string, auditId: string) {
 
 const runInputSchema = {
   projectId: projectIdSchema,
-  url: z.string().min(1).max(2048).describe("Start URL to crawl."),
+  url: z
+    .string()
+    .min(1)
+    .max(2048)
+    .optional()
+    .describe(
+      "Start URL to crawl. Defaults to the project's domain, so pass this only to audit a specific subdomain, path, or staging host.",
+    ),
   maxPages: z
     .number()
     .int()
@@ -69,7 +76,7 @@ export const runSiteAuditTool = {
   config: {
     title: "Run site audit",
     description:
-      "Start a site audit: crawls the site (robots.txt-aware, same-origin), checks every page for SEO issues (broken links, duplicate/missing titles and descriptions, redirect chains, orphan pages, canonical problems, thin content, and more), and optionally runs Lighthouse on a sample of pages. Runs in the background — poll get_audit_status, then read get_audit_issues. If the site blocks our crawler, pages are honestly flagged as blocked rather than misreported.",
+      "Start a site audit of the project's site: crawls it (robots.txt-aware, same-origin), checks every page for SEO issues (broken links, duplicate/missing titles and descriptions, redirect chains, orphan pages, canonical problems, thin content, and more), and optionally runs Lighthouse on a sample of pages. Runs in the background — poll get_audit_status, then read get_audit_issues. If the site blocks our crawler, pages are honestly flagged as blocked rather than misreported.",
     inputSchema: runInputSchema,
     outputSchema: z
       .object({
@@ -90,6 +97,17 @@ export const runSiteAuditTool = {
     // many-minute wait, which chat agents handle badly. The app UI passes its
     // own explicit lighthouseStrategy, so this default only governs agents.
     const lighthouseStrategy = (args.runLighthouse ?? false) ? "auto" : "none";
+    // The project already carries the site's domain, so an agent that has a
+    // projectId should not have to re-supply the URL it was configured with.
+    const startUrl =
+      args.url ??
+      (context.project.domain ? `https://${context.project.domain}` : null);
+    if (!startUrl) {
+      throw new AppError(
+        "VALIDATION_ERROR",
+        "Provide a url or set the project's domain first",
+      );
+    }
     const limitTier = await AuditService.resolveAuditLimitTier(context.billing);
     let auditId: string;
     try {
@@ -97,7 +115,7 @@ export const runSiteAuditTool = {
         actorUserId: context.auth.userId,
         billingCustomer: context.billing,
         projectId: args.projectId,
-        startUrl: args.url,
+        startUrl,
         maxPages: args.maxPages,
         lighthouseStrategy,
         limitTier,
@@ -137,7 +155,7 @@ export const runSiteAuditTool = {
     });
 
     return mcpResponse({
-      text: `Audit ${auditId} started for ${args.url}. Poll get_audit_status until it finishes, then call get_audit_issues for the prioritized issue report (even a failed audit keeps results for every page it crawled).`,
+      text: `Audit ${auditId} started for ${startUrl}. Poll get_audit_status until it finishes, then call get_audit_issues for the prioritized issue report (even a failed audit keeps results for every page it crawled).`,
       meta: buildProjectMeta(
         context,
         args.projectId,
