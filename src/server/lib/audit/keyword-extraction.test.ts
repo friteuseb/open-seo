@@ -46,4 +46,26 @@ describe("extractPageKeywords", () => {
     expect(extractPageKeywords([{ text: "", weight: 3 }])).toEqual([]);
     expect(extractPageKeywords([])).toEqual([]);
   });
+
+  it("keeps accented words whole", () => {
+    // NFKD decomposition once split these on the combining mark, leaving
+    // "gumes" and "recolte" as separate half-words.
+    const keywords = extractPageKeywords([
+      { text: "légumes récolte légumes récolte période", weight: 1 },
+    ]);
+    const terms = keywords.map((keyword) => keyword.term);
+
+    expect(terms).toContain("legumes");
+    expect(terms).toContain("recolte");
+    expect(terms).not.toContain("gumes");
+    expect(terms).not.toContain("colte");
+  });
+
+  it("drops common French fillers that would otherwise rank as topics", () => {
+    const keywords = extractPageKeywords([
+      { text: "pas pas vous vous tomates tomates", weight: 1 },
+    ]);
+
+    expect(keywords.map((keyword) => keyword.term)).toEqual(["tomates"]);
+  });
 });

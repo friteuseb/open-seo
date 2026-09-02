@@ -91,6 +91,115 @@ const STOPWORDS = new Set([
   "son",
   "sa",
   "ses",
+  // Common fillers that carry no topical signal; they surfaced as theme
+  // labels ("pas", "vous") once clustering started naming clusters.
+  "not",
+  "can",
+  "will",
+  "would",
+  "should",
+  "have",
+  "has",
+  "had",
+  "all",
+  "more",
+  "most",
+  "when",
+  "how",
+  "what",
+  "which",
+  "who",
+  "there",
+  "their",
+  "they",
+  "them",
+  "than",
+  "then",
+  "some",
+  "such",
+  "any",
+  "each",
+  "also",
+  "just",
+  "only",
+  "very",
+  "out",
+  "over",
+  "after",
+  "before",
+  "here",
+  "other",
+  "many",
+  "much",
+  "make",
+  "made",
+  "get",
+  "one",
+  "two",
+  "use",
+  "using",
+  "used",
+  "new",
+  "see",
+  "may",
+  "own",
+  "via",
+  "pas",
+  "vous",
+  "nous",
+  "plus",
+  "tout",
+  "toute",
+  "bien",
+  "comme",
+  "sans",
+  "aussi",
+  "peut",
+  "peuvent",
+  "faire",
+  "fait",
+  "cette",
+  "cet",
+  "ils",
+  "elle",
+  "elles",
+  "encore",
+  "tres",
+  "entre",
+  "avoir",
+  "avez",
+  "avant",
+  "apres",
+  "chaque",
+  "autre",
+  "autres",
+  "meme",
+  "memes",
+  "deux",
+  "dont",
+  "celui",
+  "cela",
+  "sous",
+  "lors",
+  "ainsi",
+  "toujours",
+  "jamais",
+  "beaucoup",
+  "moins",
+  "doit",
+  "doivent",
+  "etes",
+  "sera",
+  "seront",
+  "chez",
+  "vers",
+  "depuis",
+  "pendant",
+  "afin",
+  "car",
+  "ici",
+  "non",
+  "oui",
 ]);
 
 const MIN_TERM_LENGTH = 3;
@@ -109,17 +218,25 @@ export interface PageKeyword {
 }
 
 function tokenize(text: string): string[] {
-  return text
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[^\p{L}\s]/gu, " ")
-    .split(/\s+/)
-    .filter(
-      (word) =>
-        word.length >= MIN_TERM_LENGTH &&
-        word.length <= MAX_TERM_LENGTH &&
-        !STOPWORDS.has(word),
-    );
+  return (
+    text
+      .toLowerCase()
+      .normalize("NFKD")
+      // NFKD splits an accented letter into a base letter plus a combining
+      // mark, and a combining mark is not \p{L}. Without dropping the marks
+      // first, the next replace turns them into spaces and cuts accented words
+      // in half — "légumes" became "gumes", "récolte" became "colte". Stripping
+      // them also matches the accent-free spellings in STOPWORDS.
+      .replace(/\p{M}+/gu, "")
+      .replace(/[^\p{L}\s]/gu, " ")
+      .split(/\s+/)
+      .filter(
+        (word) =>
+          word.length >= MIN_TERM_LENGTH &&
+          word.length <= MAX_TERM_LENGTH &&
+          !STOPWORDS.has(word),
+      )
+  );
 }
 
 /**
