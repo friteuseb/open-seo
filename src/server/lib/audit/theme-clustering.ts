@@ -244,6 +244,9 @@ function labelClusters(
       picked.push(term);
       if (picked.length === TERMS_PER_LABEL) break;
     }
+    // Last resort before a meaningless "Group 3": reuse a term another
+    // cluster already took. A repeated word still says more than a number.
+    if (picked.length === 0 && ranked.length > 0) picked.push(ranked[0].term);
     for (const term of picked) used.add(term);
 
     return picked.length > 0 ? picked.join(" · ") : `Group ${cluster + 1}`;
