@@ -212,7 +212,7 @@ function labelClusters(
     (documentCount.get(term) ?? 0) / pages.length > MAX_DOCUMENT_RATIO;
 
   const used = new Set<string>();
-  return clusterWeights.map((weights, cluster) => {
+  return clusterWeights.map((weights) => {
     const candidates = Array.from(weights.entries()).filter(
       ([term]) => !isSiteVocabulary(term),
     );
@@ -249,7 +249,9 @@ function labelClusters(
     if (picked.length === 0 && ranked.length > 0) picked.push(ranked[0].term);
     for (const term of picked) used.add(term);
 
-    return picked.length > 0 ? picked.join(" · ") : `Group ${cluster + 1}`;
+    // Pages with no keywords at all are the redirects and 404s the crawl
+    // followed; saying so beats numbering them.
+    return picked.length > 0 ? picked.join(" · ") : "No page content";
   });
 }
 
