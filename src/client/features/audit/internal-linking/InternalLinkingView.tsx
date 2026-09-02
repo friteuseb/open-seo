@@ -1,19 +1,20 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { sort } from "remeda";
-import { Network, TriangleAlert } from "lucide-react";
-import { SafeExternalLink } from "@/client/components/SafeExternalLink";
-import {
-  extractUrlPath,
-  truncateMiddle,
-} from "@/client/features/backlinks/backlinksPageUtils";
+import { Network, Search } from "lucide-react";
 import type { AuditResultsData } from "@/client/features/audit/results/types";
-import { ThemeLegend } from "@/client/features/audit/internal-linking/ThemeLegend";
 import {
-  InternalLinkingGraph,
-  type GraphEdge,
-  type GraphLayout,
-  type GraphNode,
-} from "@/client/features/audit/internal-linking/InternalLinkingGraph";
+  MetricsStrip,
+  SelectedPage,
+  SuggestionsList,
+} from "@/client/features/audit/internal-linking/InternalLinkingPanels";
+import { ThemeLegend } from "@/client/features/audit/internal-linking/ThemeLegend";
+import { useFullscreen } from "@/client/features/audit/internal-linking/useFullscreen";
+import { InternalLinkingGraph } from "@/client/features/audit/internal-linking/InternalLinkingGraph";
+import type {
+  GraphEdge,
+  GraphLayout,
+  GraphNode,
+} from "@/client/features/audit/internal-linking/graph-model";
 
 import {
   parseBrokenLinkDetails,
@@ -49,6 +50,14 @@ export function InternalLinkingView({
   const [hiddenUrls, setHiddenUrls] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
+  // Menu, footer and sidebar links connect every page to every other one.
+  // They are off by default: with them drawn the graph shows the template,
+  // not the editorial structure the metrics are computed from.
+  const [showTemplateLinks, setShowTemplateLinks] = useState(false);
+  const [query, setQuery] = useState("");
+
+  const panelRef = useRef<HTMLDivElement>(null);
+  const { isFullscreen, toggle: toggleFullscreen } = useFullscreen(panelRef);
 
   const hideNode = useCallback((node: GraphNode) => {
     setHiddenUrls((current) => new Set(current).add(node.id));
@@ -56,6 +65,12 @@ export function InternalLinkingView({
   }, []);
 
   const showAllNodes = useCallback(() => setHiddenUrls(new Set()), []);
+  const clearSelection = useCallback(() => setSelectedNode(null), []);
+  const selectNode = useCallback(
+    (node: GraphNode) =>
+      setSelectedNode((current) => (current?.id === node.id ? null : node)),
+    [],
+  );
 
   const pagesByUrl = useMemo(
     () => new Map(pages.map((page) => [page.url, page])),
@@ -123,7 +138,11 @@ export function InternalLinkingView({
       const source = pageUrlById.get(link.sourcePageId);
       const target = pageUrlById.get(link.targetPageId);
       if (!source || !target || source === target) continue;
-      graphEdges.push({ source, target, kind: "internal" });
+      graphEdges.push({
+        source,
+        target,
+        kind: link.isBoilerplate ? "template" : "body",
+      });
     }
     for (const { issue, details } of brokenLinks) {
       if (!pagesByUrl.has(issue.pageUrl) || !pagesByUrl.has(details.targetUrl))
@@ -158,10 +177,15 @@ export function InternalLinkingView({
     return ids;
   }, [nodes]);
 
-  const internalEdgeCount = useMemo(
-    () => edges.filter((edge) => edge.kind === "internal").length,
-    [edges],
-  );
+  const linkCounts = useMemo(() => {
+    let body = 0;
+    let template = 0;
+    for (const edge of edges) {
+      if (edge.kind === "body") body += 1;
+      else if (edge.kind === "template") template += 1;
+    }
+    return { body, template };
+  }, [edges]);
 
   // Inside a theme, colour by sub-cluster and grey out everything else, so the
   // drill-down reads as "zooming in" rather than as a different graph.
@@ -180,11 +204,14 @@ export function InternalLinkingView({
 
   // An edge to a hidden page would dangle, so both ends must still be visible.
   const { visibleNodes, visibleEdges } = useMemo(() => {
+    const keptEdges = showTemplateLinks
+      ? edges
+      : edges.filter((edge) => edge.kind !== "template");
     if (hiddenUrls.size === 0)
-      return { visibleNodes: drilledNodes, visibleEdges: edges };
+      return { visibleNodes: drilledNodes, visibleEdges: keptEdges };
     return {
       visibleNodes: drilledNodes.filter((node) => !hiddenUrls.has(node.id)),
-      visibleEdges: edges.filter(
+      visibleEdges: keptEdges.filter(
         (edge) =>
           typeof edge.source === "string" &&
           typeof edge.target === "string" &&
@@ -192,7 +219,24 @@ export function InternalLinkingView({
           !hiddenUrls.has(edge.target),
       ),
     };
-  }, [drilledNodes, edges, hiddenUrls]);
+  }, [drilledNodes, edges, hiddenUrls, showTemplateLinks]);
+
+  // Search dims the rest of the graph rather than removing it: where a page
+  // sits among its neighbours is most of what the reader came for.
+  const matchedIds = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    if (!needle) return null;
+    const matches = new Set<string>();
+    for (const node of visibleNodes) {
+      if (
+        node.title.toLowerCase().includes(needle) ||
+        node.id.toLowerCase().includes(needle)
+      ) {
+        matches.add(node.id);
+      }
+    }
+    return matches;
+  }, [query, visibleNodes]);
 
   if (!hasGraphMetrics) {
     return (
@@ -210,181 +254,116 @@ export function InternalLinkingView({
     <div className="flex flex-col gap-4">
       <MetricsStrip
         pageCount={pages.length}
+        bodyLinkCount={linkCounts.body}
+        templateLinkCount={linkCounts.template}
         orphanCount={orphanCount}
         brokenCount={brokenLinks.length}
         suggestionCount={suggestions.length}
       />
 
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div role="tablist" className="tabs tabs-boxed tabs-sm">
-          <button
-            role="tab"
-            className={`tab ${layout === "links" ? "tab-active" : ""}`}
-            onClick={() => setLayout("links")}
-          >
-            Link graph
-          </button>
-          <button
-            role="tab"
-            className={`tab ${layout === "topics" ? "tab-active" : ""}`}
-            onClick={() => setLayout("topics")}
-          >
-            Grouped by topic
-          </button>
-        </div>
-        <span className="text-xs text-base-content/50">
-          {internalEdgeCount.toLocaleString()} internal links
-        </span>
-      </div>
-
-      <InternalLinkingGraph
-        nodes={visibleNodes}
-        edges={visibleEdges}
-        layout={layout}
-        onNodeClick={setSelectedNode}
-        onNodeHide={hideNode}
-      />
-
-      <div className="flex flex-wrap items-center gap-3">
-        <ThemeLegend
-          nodes={visibleNodes}
-          splittableThemes={splittableThemes}
-          onDrillInto={drilledTheme == null ? setDrilledTheme : undefined}
-        />
-        {drilledTheme != null && (
-          <button
-            className="btn btn-ghost btn-xs"
-            onClick={() => setDrilledTheme(null)}
-          >
-            ← All topics
-          </button>
-        )}
-        {hiddenUrls.size > 0 && (
-          <button className="btn btn-ghost btn-xs" onClick={showAllNodes}>
-            Show {hiddenUrls.size} hidden page
-            {hiddenUrls.size === 1 ? "" : "s"}
-          </button>
-        )}
-      </div>
-      <p className="text-xs text-base-content/50">
-        Click a node for details · right-click to hide it · scroll to zoom
-      </p>
-
-      {selectedNode && (
-        <div className="flex items-center justify-between rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-sm">
-          <div className="min-w-0">
-            <p className="font-medium truncate">{selectedNode.title}</p>
-            <p className="text-xs text-base-content/60">
-              {selectedNode.inboundLinkCount} inbound ·{" "}
-              {(selectedNode.pagerank * 100).toFixed(2)} PageRank
-              {selectedNode.isOrphan && " · orphaned"}
-              {selectedNode.themeLabel && ` · ${selectedNode.themeLabel}`}
-            </p>
+      <div
+        ref={panelRef}
+        className={`flex flex-col gap-3 ${
+          isFullscreen ? "h-screen w-screen bg-base-100 p-4" : ""
+        }`}
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <div role="tablist" className="tabs tabs-boxed tabs-sm">
+            <button
+              role="tab"
+              className={`tab ${layout === "links" ? "tab-active" : ""}`}
+              onClick={() => setLayout("links")}
+            >
+              Link graph
+            </button>
+            <button
+              role="tab"
+              className={`tab ${layout === "topics" ? "tab-active" : ""}`}
+              onClick={() => setLayout("topics")}
+            >
+              Grouped by topic
+            </button>
           </div>
-          <SafeExternalLink
-            url={selectedNode.id}
-            label="Open"
-            className="link link-primary text-xs shrink-0 ml-3"
-          />
+
+          <label className="relative">
+            <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-base-content/40" />
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Find a page"
+              aria-label="Find a page"
+              className="input input-sm input-bordered w-48 pl-7"
+            />
+          </label>
+
+          <label
+            className="flex cursor-pointer items-center gap-2 text-xs text-base-content/70"
+            title="Menu, footer and sidebar links. They are excluded from PageRank, inbound counts and suggestions."
+          >
+            <input
+              type="checkbox"
+              className="toggle toggle-xs"
+              checked={showTemplateLinks}
+              onChange={(event) => setShowTemplateLinks(event.target.checked)}
+            />
+            Show template links
+          </label>
+
+          <span className="ml-auto text-xs text-base-content/50">
+            {matchedIds
+              ? `${matchedIds.size.toLocaleString()} of ${visibleNodes.length.toLocaleString()} pages match`
+              : `${linkCounts.body.toLocaleString()} body links · ${linkCounts.template.toLocaleString()} in the template`}
+          </span>
         </div>
-      )}
+
+        <InternalLinkingGraph
+          nodes={visibleNodes}
+          edges={visibleEdges}
+          layout={layout}
+          selectedId={selectedNode?.id ?? null}
+          matchedIds={matchedIds}
+          onNodeClick={selectNode}
+          onNodeHide={hideNode}
+          onClearSelection={clearSelection}
+          isFullscreen={isFullscreen}
+          onToggleFullscreen={toggleFullscreen}
+          className={isFullscreen ? "min-h-0 flex-1" : "h-[560px]"}
+        />
+
+        <div className="flex flex-wrap items-center gap-3">
+          <ThemeLegend
+            nodes={visibleNodes}
+            splittableThemes={splittableThemes}
+            onDrillInto={drilledTheme == null ? setDrilledTheme : undefined}
+          />
+          {drilledTheme != null && (
+            <button
+              className="btn btn-ghost btn-xs"
+              onClick={() => setDrilledTheme(null)}
+            >
+              ← All topics
+            </button>
+          )}
+          {hiddenUrls.size > 0 && (
+            <button className="btn btn-ghost btn-xs" onClick={showAllNodes}>
+              Show {hiddenUrls.size} hidden page
+              {hiddenUrls.size === 1 ? "" : "s"}
+            </button>
+          )}
+        </div>
+
+        {selectedNode ? (
+          <SelectedPage node={selectedNode} onClose={clearSelection} />
+        ) : (
+          <p className="text-xs text-base-content/50">
+            Click a page to light up what it links to and what links to it ·
+            right-click to hide it · scroll to zoom
+          </p>
+        )}
+      </div>
 
       <SuggestionsList suggestions={suggestions} />
-    </div>
-  );
-}
-
-function MetricsStrip({
-  pageCount,
-  orphanCount,
-  brokenCount,
-  suggestionCount,
-}: {
-  pageCount: number;
-  orphanCount: number;
-  brokenCount: number;
-  suggestionCount: number;
-}) {
-  const items = [
-    { label: "Pages", value: pageCount },
-    {
-      label: "Orphaned pages",
-      value: orphanCount,
-      valueClass: orphanCount > 0 ? "text-warning" : "text-success",
-    },
-    {
-      label: "Broken internal links",
-      value: brokenCount,
-      valueClass: brokenCount > 0 ? "text-error" : "text-success",
-    },
-    { label: "Linking opportunities", value: suggestionCount },
-  ];
-
-  return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-px rounded-lg border border-base-300 bg-base-300/70 overflow-hidden">
-      {items.map((item) => (
-        <div key={item.label} className="bg-base-100 px-4 py-3">
-          <p className="text-[11px] uppercase tracking-wider text-base-content/50">
-            {item.label}
-          </p>
-          <p
-            className={`text-xl font-semibold mt-0.5 tabular-nums ${item.valueClass ?? ""}`}
-          >
-            {item.value}
-          </p>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function SuggestionsList({
-  suggestions,
-}: {
-  suggestions: Array<{ issue: AuditIssue; details: LinkSuggestionDetails }>;
-}) {
-  if (suggestions.length === 0) {
-    return (
-      <p className="text-sm text-base-content/60 py-4 text-center">
-        No linking opportunities found — either the site is well cross-linked,
-        or no similar-enough pages were found.
-      </p>
-    );
-  }
-
-  return (
-    <div className="card bg-base-100 border border-base-300">
-      <div className="card-body gap-2">
-        <h3 className="font-medium text-sm flex items-center gap-2">
-          <TriangleAlert className="size-4 text-base-content/50" />
-          Suggested internal links
-        </h3>
-        <ul className="flex flex-col divide-y divide-base-200">
-          {suggestions.map(({ issue, details }) => (
-            <li
-              key={`${issue.pageUrl}->${details.targetUrl}`}
-              className="flex items-center justify-between gap-3 py-2 text-sm"
-            >
-              <div className="min-w-0 flex items-center gap-2 flex-wrap">
-                <SafeExternalLink
-                  url={issue.pageUrl}
-                  label={truncateMiddle(extractUrlPath(issue.pageUrl), 40)}
-                  className="link link-hover"
-                />
-                <span className="text-base-content/40">&rarr;</span>
-                <SafeExternalLink
-                  url={details.targetUrl}
-                  label={truncateMiddle(extractUrlPath(details.targetUrl), 40)}
-                  className="link link-hover"
-                />
-              </div>
-              <span className="badge badge-ghost badge-sm shrink-0 tabular-nums">
-                {Math.round(details.similarityScore * 100)}% similar
-              </span>
-            </li>
-          ))}
-        </ul>
-      </div>
     </div>
   );
 }

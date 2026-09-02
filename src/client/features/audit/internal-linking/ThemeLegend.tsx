@@ -3,7 +3,7 @@ import { sort } from "remeda";
 import {
   themeColorForId,
   type GraphNode,
-} from "@/client/features/audit/internal-linking/InternalLinkingGraph";
+} from "@/client/features/audit/internal-linking/graph-model";
 
 /**
  * Names the colours. Without it the clusters are decoration: the reader can
