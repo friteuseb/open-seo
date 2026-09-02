@@ -224,6 +224,23 @@ const STOPWORDS = new Set([
   "selon",
   "dessus",
   "dessous",
+  "fois",
+  "chose",
+  "choses",
+  "facon",
+  "maniere",
+  "moment",
+  "cas",
+  "type",
+  "sorte",
+  "partie",
+  "exemple",
+  "point",
+  "cote",
+  "lieu",
+  "sujet",
+  "raison",
+  "effet",
 ]);
 
 const MIN_TERM_LENGTH = 3;
