@@ -30,14 +30,18 @@ function configured() {
   );
 }
 
+/** Records what the module asked for, typed at the boundary rather than cast after. */
 function answers(content: string) {
-  vi.stubGlobal(
-    "fetch",
-    vi.fn().mockResolvedValue({
+  const calls: Array<{ url: string; headers: Record<string, string> }> = [];
+  const stub = (url: string, init: { headers: Record<string, string> }) => {
+    calls.push({ url, headers: init.headers });
+    return Promise.resolve({
       ok: true,
-      json: async () => ({ message: { content } }),
-    }),
-  );
+      json: () => Promise.resolve({ choices: [{ message: { content } }] }),
+    });
+  };
+  vi.stubGlobal("fetch", vi.fn(stub));
+  return calls;
 }
 
 describe("nameThemeClusters", () => {
@@ -77,10 +81,32 @@ describe("nameThemeClusters", () => {
     expect(await nameThemeClusters(clusters)).toBeNull();
   });
 
-  it("stays off until a deployment names a chat model", async () => {
+  it("calls the OpenAI chat-completions route, which Ollama also serves", async () => {
+    const calls = answers('{"1": "Arbustes"}');
+
+    await nameThemeClusters(clusters);
+
+    expect(calls[0].url).toBe("http://model.test/v1/chat/completions");
+    expect(calls[0].headers.authorization).toBeUndefined();
+  });
+
+  it("falls back to the instance's OpenRouter key when no local model is set", async () => {
+    // A hosted deployment configures neither embeddings nor a naming endpoint,
+    // but already has a key for its chat agents.
     mocks.getOptionalEnvValue.mockImplementation(async (key: string) =>
-      key === "EMBEDDINGS_BASE_URL" ? "http://model.test" : undefined,
+      key === "OPENROUTER_API_KEY" ? "sk-test" : undefined,
     );
+    const calls = answers('{"1": "Fruit trees"}');
+
+    const labels = await nameThemeClusters(clusters);
+
+    expect(labels?.get(1)).toBe("Fruit trees");
+    expect(calls[0].url).toBe("https://openrouter.ai/api/v1/chat/completions");
+    expect(calls[0].headers.authorization).toBe("Bearer sk-test");
+  });
+
+  it("stays off when nothing at all is configured", async () => {
+    mocks.getOptionalEnvValue.mockResolvedValue(undefined);
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
 

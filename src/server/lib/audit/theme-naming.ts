@@ -27,27 +27,73 @@ export interface ClusterToName {
   pageTitles: string[];
 }
 
+// The OpenAI chat-completions shape, which Ollama, OpenRouter and OpenAI all
+// speak — one code path for a local model and a hosted one.
 const responseSchema = z.object({
-  message: z.object({ content: z.string() }),
+  choices: z
+    .array(z.object({ message: z.object({ content: z.string() }) }))
+    .min(1),
 });
 
+const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+/** Matches the chat agents' default, so an instance with OpenRouter configured needs no extra setup. */
+const OPENROUTER_FALLBACK_MODEL = "openai/gpt-5.6-luna";
+
 /**
- * Where to name clusters. Defaults to the embeddings endpoint, which is
- * already an Ollama-style server in every deployment that has one, so a
- * self-hoster gets this by setting one variable instead of two.
+ * Which model names the clusters, in order of preference:
+ *
+ * 1. An endpoint set for this job (THEME_NAMING_BASE_URL + _MODEL, plus
+ *    _API_KEY when it needs one).
+ * 2. The embeddings endpoint, when it also serves a chat model — the usual
+ *    self-hosted case, where one local server does both.
+ * 3. OpenRouter, using the key the instance already has for its chat agents.
+ *    This is what makes the feature work on a hosted deployment, or anywhere
+ *    with no local model, without configuring anything at all.
  */
 async function getNamingConfig(): Promise<{
   baseUrl: string;
   model: string;
+  apiKey: string | null;
 } | null> {
-  const baseUrl =
-    (await getOptionalEnvValue("THEME_NAMING_BASE_URL")) ??
-    (await getOptionalEnvValue("EMBEDDINGS_BASE_URL"));
   const model = await getOptionalEnvValue("THEME_NAMING_MODEL");
-  // No default model: an embeddings endpoint cannot chat, so naming stays off
-  // until a deployment names a chat model explicitly.
-  if (!baseUrl || !model) return null;
-  return { baseUrl: baseUrl.replace(/\/$/, ""), model };
+
+  const dedicatedUrl = await getOptionalEnvValue("THEME_NAMING_BASE_URL");
+  if (dedicatedUrl && model) {
+    return {
+      baseUrl: dedicatedUrl,
+      model,
+      apiKey: (await getOptionalEnvValue("THEME_NAMING_API_KEY")) ?? null,
+    };
+  }
+
+  // An embeddings endpoint cannot chat on its own, so this path needs the
+  // deployment to say which chat model that server also serves.
+  const embeddingsUrl = await getOptionalEnvValue("EMBEDDINGS_BASE_URL");
+  if (embeddingsUrl && model) {
+    return { baseUrl: embeddingsUrl, model, apiKey: null };
+  }
+
+  const openRouterKey = await getOptionalEnvValue("OPENROUTER_API_KEY");
+  if (openRouterKey) {
+    return {
+      baseUrl: OPENROUTER_BASE_URL,
+      model:
+        model ??
+        (await getOptionalEnvValue("OPENROUTER_MODEL")) ??
+        OPENROUTER_FALLBACK_MODEL,
+      apiKey: openRouterKey,
+    };
+  }
+
+  return null;
+}
+
+/** Both "http://host:11434" and ".../api/v1" style base URLs are accepted. */
+function chatCompletionsUrl(baseUrl: string): string {
+  const trimmed = baseUrl.replace(/\/$/, "");
+  return trimmed.endsWith("/v1")
+    ? `${trimmed}/chat/completions`
+    : `${trimmed}/v1/chat/completions`;
 }
 
 function buildPrompt(clusters: ClusterToName[]): string {
@@ -111,17 +157,22 @@ export async function nameThemeClusters(
   if (!config) return null;
 
   try {
-    const response = await fetch(`${config.baseUrl}/api/chat`, {
+    const response = await fetch(chatCompletionsUrl(config.baseUrl), {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        ...(config.apiKey
+          ? { authorization: `Bearer ${config.apiKey}` }
+          : undefined),
+      },
       body: JSON.stringify({
         model: config.model,
         messages: [{ role: "user", content: buildPrompt(clusters) }],
         stream: false,
-        // Reasoning traces would land in `content` and break the JSON parse.
-        think: false,
-        format: "json",
-        options: { temperature: 0.2 },
+        // Providers that support it return strict JSON; the others ignore the
+        // field and parseLabels rejects whatever prose comes back instead.
+        response_format: { type: "json_object" },
+        temperature: 0.2,
       }),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
@@ -130,7 +181,7 @@ export async function nameThemeClusters(
     const parsed = responseSchema.safeParse(await response.json());
     if (!parsed.success) return null;
 
-    return parseLabels(parsed.data.message.content, clusters);
+    return parseLabels(parsed.data.choices[0].message.content, clusters);
   } catch {
     // Endpoint down, timed out, or answered something unparseable. The audit
     // keeps its keyword labels rather than failing over a cosmetic step.
