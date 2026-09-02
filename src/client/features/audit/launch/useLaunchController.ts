@@ -39,10 +39,13 @@ function getLaunchValidationErrors(
 
 export function useLaunchController({
   projectId,
+  defaultUrl,
   isFreePlan,
   onAuditStarted,
 }: {
   projectId: string;
+  /** Seeds the URL field so a project with a domain audits itself in one click. */
+  defaultUrl: string;
   isFreePlan: boolean;
   onAuditStarted: (auditId: string) => void;
 }) {
@@ -57,7 +60,7 @@ export function useLaunchController({
   });
 
   const launchForm = useForm({
-    defaultValues: DEFAULT_LAUNCH_FORM_VALUES,
+    defaultValues: { ...DEFAULT_LAUNCH_FORM_VALUES, url: defaultUrl },
     validators: {
       onChange: ({ formApi, value }) =>
         getLaunchValidationErrors(

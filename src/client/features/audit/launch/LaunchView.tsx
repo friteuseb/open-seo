@@ -3,6 +3,7 @@ import { AuditHistorySection } from "@/client/features/audit/launch/AuditHistory
 import { LaunchFormCard } from "@/client/features/audit/launch/LaunchFormCard";
 import { useLaunchController } from "@/client/features/audit/launch/useLaunchController";
 import { getCustomerPlanStatus } from "@/client/features/billing/plan-detection";
+import { useProject } from "@/client/features/projects/useProject";
 import { useSession } from "@/lib/auth-client";
 import { isHostedClientAuthMode } from "@/lib/auth-mode";
 
@@ -43,8 +44,39 @@ function LaunchContent({
   isFreePlan,
   onAuditStarted,
 }: LaunchViewProps & { isFreePlan: boolean }) {
+  const project = useProject(projectId);
+
+  // The form seeds its URL field from the project's domain, so wait for the
+  // row before mounting it. The app shell has already warmed this query, so
+  // this resolves from cache rather than flashing a spinner.
+  if (!project) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <span className="loading loading-spinner loading-lg" />
+      </div>
+    );
+  }
+
+  return (
+    <LaunchForm
+      key={projectId}
+      projectId={projectId}
+      defaultUrl={project.domain ? `https://${project.domain}` : ""}
+      isFreePlan={isFreePlan}
+      onAuditStarted={onAuditStarted}
+    />
+  );
+}
+
+function LaunchForm({
+  projectId,
+  defaultUrl,
+  isFreePlan,
+  onAuditStarted,
+}: LaunchViewProps & { defaultUrl: string; isFreePlan: boolean }) {
   const controller = useLaunchController({
     projectId,
+    defaultUrl,
     isFreePlan,
     onAuditStarted,
   });
