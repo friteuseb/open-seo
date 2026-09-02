@@ -23,6 +23,7 @@ describe("chooseClusterCount", () => {
 
   it("stays within the legend's readable range as a site grows", () => {
     expect(chooseClusterCount(60)).toBe(2);
+    expect(chooseClusterCount(240)).toBe(8);
     expect(chooseClusterCount(600)).toBe(10);
     expect(chooseClusterCount(100_000)).toBe(10);
   });

@@ -45,12 +45,15 @@ const MAX_DOCUMENT_RATIO = 0.4;
 const MIN_DOCUMENTS_FOR_RATIO = 5;
 
 /**
- * Roughly one cluster per 60 pages, bounded. Enough separation to be useful
- * on a large site without producing more colours than a reader can hold.
+ * Roughly one cluster per 30 pages, bounded. Coarser than this and a site
+ * whose pages follow one template (product or plant sheets, say) collapses
+ * into a single colour that separates nothing.
  */
+const PAGES_PER_CLUSTER = 30;
+
 export function chooseClusterCount(pageCount: number): number {
   if (pageCount < 2 * MIN_CLUSTERS) return Math.min(pageCount, MIN_CLUSTERS);
-  const suggested = Math.round(pageCount / 60);
+  const suggested = Math.round(pageCount / PAGES_PER_CLUSTER);
   return Math.max(MIN_CLUSTERS, Math.min(MAX_CLUSTERS, suggested));
 }
 
