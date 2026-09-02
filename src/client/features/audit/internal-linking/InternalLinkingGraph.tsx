@@ -58,8 +58,14 @@ const THEME_COLORS = [
   "#a6761d",
 ] as const;
 const UNTHEMED_COLOR = "#7a8394";
-/** Pull towards the cluster's centre of mass; gentle enough that link forces still shape the layout. */
-const CLUSTER_STRENGTH = 0.12;
+/**
+ * Pull towards the cluster's anchor in "topics" layout. It has to overpower
+ * thousands of link forces pulling every cluster back into one ball, so it is
+ * deliberately strong — this layout trades the real shape for separation.
+ */
+const CLUSTER_STRENGTH = 0.9;
+/** Link forces are damped in "topics" so they position within a cluster rather than across. */
+const TOPIC_LINK_STRENGTH = 0.02;
 /** Below this zoom only the most linked pages are named, or labels overlap into mush. */
 const LABEL_ZOOM_THRESHOLD = 1.4;
 /** How many pages keep a permanent label at overview zoom. */
@@ -83,32 +89,54 @@ function truncate(text: string): string {
 }
 
 /**
- * Attracts each node towards its cluster's centre of mass, so pages on the
- * same subject settle together instead of being scattered by the link force
- * alone. Centres are recomputed every tick from the nodes themselves, so no
- * fixed positions have to be invented for clusters.
+ * Lays the clusters out as islands on a ring, one anchor per topic, and pulls
+ * each node to its own. Fixed anchors rather than each cluster's centre of
+ * mass: a centre of mass drifts with the link forces, so on a densely linked
+ * site every cluster converges on the middle and nothing separates.
+ *
+ * Every link stays drawn, so the layout answers what this view is for — which
+ * topics link to which, and which pages carry that traffic between them.
  */
-function forceCluster(nodes: GraphNode[], strength: number) {
-  return (alpha: number) => {
-    const sums = new Map<number, { x: number; y: number; count: number }>();
-    for (const node of nodes) {
-      if (node.themeId == null) continue;
-      const entry = sums.get(node.themeId) ?? { x: 0, y: 0, count: 0 };
-      entry.x += node.x ?? 0;
-      entry.y += node.y ?? 0;
-      entry.count += 1;
-      sums.set(node.themeId, entry);
-    }
+function forceCluster(
+  nodes: GraphNode[],
+  strength: number,
+  width: number,
+  height: number,
+) {
+  // remeda's sort, not Array#sort (mutates) nor toSorted (ES2023, banned here).
+  const themeIds = sort(
+    Array.from(
+      new Set(
+        nodes
+          .map((node) => node.themeId)
+          .filter((id): id is number => id != null),
+      ),
+    ),
+    (a, b) => a - b,
+  );
 
+  const radius = Math.min(width, height) * 0.36;
+  const anchors = new Map(
+    themeIds.map((id, index) => {
+      const angle = (2 * Math.PI * index) / themeIds.length - Math.PI / 2;
+      return [
+        id,
+        {
+          x: width / 2 + radius * Math.cos(angle),
+          y: height / 2 + radius * Math.sin(angle),
+        },
+      ];
+    }),
+  );
+
+  return (alpha: number) => {
     for (const node of nodes) {
       if (node.themeId == null) continue;
-      const centre = sums.get(node.themeId);
-      if (!centre || centre.count === 0) continue;
+      const anchor = anchors.get(node.themeId);
+      if (!anchor) continue;
       const pull = strength * alpha;
-      node.vx =
-        (node.vx ?? 0) + (centre.x / centre.count - (node.x ?? 0)) * pull;
-      node.vy =
-        (node.vy ?? 0) + (centre.y / centre.count - (node.y ?? 0)) * pull;
+      node.vx = (node.vx ?? 0) + (anchor.x - (node.x ?? 0)) * pull;
+      node.vy = (node.vy ?? 0) + (anchor.y - (node.y ?? 0)) * pull;
     }
   };
 }
@@ -283,9 +311,14 @@ export function InternalLinkingGraph({
     const simulation = forceSimulation(simNodes)
       .force(
         "link",
-        forceLink<GraphNode, GraphEdge>(simEdges)
-          .id((d) => d.id)
-          .distance(90),
+        layout === "topics"
+          ? forceLink<GraphNode, GraphEdge>(simEdges)
+              .id((d) => d.id)
+              .distance(90)
+              .strength(TOPIC_LINK_STRENGTH)
+          : forceLink<GraphNode, GraphEdge>(simEdges)
+              .id((d) => d.id)
+              .distance(90),
       )
       .force("charge", forceManyBody().strength(CHARGE_STRENGTH))
       .force("center", forceCenter(width / 2, height / 2))
@@ -295,7 +328,12 @@ export function InternalLinkingGraph({
       );
 
     if (layout === "topics" && simNodes.some((node) => node.themeId != null)) {
-      simulation.force("cluster", forceCluster(simNodes, CLUSTER_STRENGTH));
+      // The centring force would fight the anchors back into one ball.
+      simulation.force("center", null);
+      simulation.force(
+        "cluster",
+        forceCluster(simNodes, CLUSTER_STRENGTH, width, height),
+      );
     }
 
     simulation.on("tick", () => {
