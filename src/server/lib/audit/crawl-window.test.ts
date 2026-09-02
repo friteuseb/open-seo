@@ -37,6 +37,7 @@ function page(
     headingOrder: [],
     wordCount: 0,
     contentHash: null,
+    contentExcerpt: null,
     isHtml: true,
     htmlBytes,
     imagesTotal: 0,

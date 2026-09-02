@@ -42,13 +42,26 @@ describe("embedTexts", () => {
 });
 
 describe("buildPageEmbeddingText", () => {
-  it("skips missing head fields rather than embedding empty separators", () => {
+  it("skips missing fields rather than embedding empty separators", () => {
     expect(
       buildPageEmbeddingText({
         title: "Couvreur à Lyon",
         metaDescription: null,
+        contentExcerpt: null,
         keywords: [{ term: "toiture" }, { term: "zinguerie" }],
       }),
     ).toBe("Couvreur à Lyon. toiture zinguerie");
+  });
+
+  it("embeds the body text, which is what separates same-template pages", () => {
+    const text = buildPageEmbeddingText({
+      title: "Nénuphar : culture, plantation et entretien",
+      metaDescription: null,
+      contentExcerpt: "À planter en panier à 40-100 cm dans un bassin.",
+      keywords: [{ term: "bassin" }],
+    });
+
+    expect(text).toContain("bassin");
+    expect(text).toContain("40-100 cm");
   });
 });

@@ -40,6 +40,7 @@ function makePage(overrides: Partial<CrawledPageResult>): CrawledPageResult {
     headingOrder: [1, 2, 3],
     wordCount: 500,
     contentHash: "abc123",
+    contentExcerpt: null,
     isHtml: true,
     htmlBytes: 10_000,
     imagesTotal: 0,

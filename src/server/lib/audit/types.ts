@@ -135,6 +135,8 @@ export interface CrawledPageResult {
   headingOrder: number[];
   wordCount: number;
   contentHash: string | null;
+  /** Bounded body-text slice used to embed the page at finalize. */
+  contentExcerpt: string | null;
   /**
    * True when an HTML document was fetched and analyzed. Gates the content
    * checks in page reporters (an empty-shell HTML page must still be

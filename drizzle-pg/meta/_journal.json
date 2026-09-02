@@ -183,6 +183,13 @@
       "when": 1788348887153,
       "tag": "0025_sudden_stephen_strange",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1788365233313,
+      "tag": "0026_majestic_enchantress",
+      "breakpoints": true
     }
   ]
 }

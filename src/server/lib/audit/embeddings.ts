@@ -87,11 +87,16 @@ export async function embedTexts(texts: string[]): Promise<number[][] | null> {
 export function buildPageEmbeddingText(page: {
   title: string | null;
   metaDescription: string | null;
+  contentExcerpt: string | null;
   keywords: Array<{ term: string }>;
 }): string {
+  // The body carries the topic; title and meta often only carry the template.
+  // On a site whose sheets are all "X: sowing and care", two pages differ in
+  // their body text long before they differ in their title.
   return [
     page.title ?? "",
     page.metaDescription ?? "",
+    page.contentExcerpt ?? "",
     page.keywords.map((keyword) => keyword.term).join(" "),
   ]
     .filter((part) => part.trim() !== "")

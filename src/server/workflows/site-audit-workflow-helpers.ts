@@ -16,6 +16,12 @@ import {
 } from "@/server/lib/audit/similarity";
 
 const CRAWL_USER_AGENT = "OpenSEO-Audit/1.0";
+/**
+ * Body text kept per page for the embedding pass. Roughly a thousand tokens:
+ * enough for the subject to be unmistakable, short enough that a 600-page
+ * audit stores a couple of megabytes rather than a hundred.
+ */
+const CONTENT_EXCERPT_CHARS = 4_000;
 const MAX_HTML_BYTES = 1024 * 1024;
 
 /**
@@ -182,6 +188,9 @@ export async function crawlPage(
       contentHash: analysis.bodyText
         ? await sha256Hex(analysis.bodyText)
         : null,
+      contentExcerpt: analysis.bodyText
+        ? analysis.bodyText.slice(0, CONTENT_EXCERPT_CHARS)
+        : null,
       isHtml: true,
       htmlBytes: body.length,
       imagesTotal: analysis.images.length,
@@ -274,6 +283,7 @@ function emptyPageResult(input: {
     title: "",
     metaDescription: "",
     canonicalUrl: null,
+    contentExcerpt: null,
     robotsMeta: null,
     xRobotsTag: input.xRobotsTag,
     headerCanonicalUrl: input.headerCanonicalUrl,
@@ -319,6 +329,7 @@ export async function findSimilarPagesForAudit(
     SimilarityCandidatePage & {
       title: string | null;
       metaDescription: string | null;
+      contentExcerpt: string | null;
     }
   >,
 ) {

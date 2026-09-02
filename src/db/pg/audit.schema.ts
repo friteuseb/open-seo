@@ -123,6 +123,12 @@ export const auditPages = pgTable(
     // computed once at crawl time. Used for cross-page similarity at
     // finalize; never sent to the client.
     keywordsJson: text("keywords_json"),
+    // Bounded slice of the page's body text, kept for the finalize-time
+    // embedding pass. Title and meta alone describe the page's subject too
+    // thinly to separate close topics: a water-plant sheet and a vegetable
+    // sheet share a template, and only the body says which is which.
+    // Server-side only, like keywordsJson — never sent to the client.
+    contentExcerpt: text("content_excerpt"),
     // Site-wide graph metrics computed at finalize from the scratchpad DO's
     // link edges (never persisted themselves — see AuditScratchpad).
     pagerank: real("pagerank"),

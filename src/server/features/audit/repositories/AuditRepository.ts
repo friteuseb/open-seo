@@ -192,6 +192,7 @@ async function insertCrawledBatch(
       inSitemap: page.inSitemap,
       responseTimeMs: page.responseTimeMs,
       keywordsJson: page.keywords.length ? JSON.stringify(page.keywords) : null,
+      contentExcerpt: page.contentExcerpt,
     };
     return tx
       .insert(auditPages)
@@ -375,10 +376,10 @@ async function getAuditResultsForProject(auditId: string, projectId: string) {
   const [pages, lighthouse, issues, links] = await Promise.all([
     db.query.auditPages.findMany({
       where: eq(auditPages.auditId, auditId),
-      // keywordsJson exists for the finalize-time similarity pass only. It is
-      // the largest column on the row (~330KB across a 600-page audit) and no
-      // client reads it, so it never leaves the server.
-      columns: { keywordsJson: false },
+      // keywordsJson and contentExcerpt exist for the finalize-time similarity
+      // and embedding passes only. They are by far the largest columns on the
+      // row and no client reads them, so they never leave the server.
+      columns: { keywordsJson: false, contentExcerpt: false },
     }),
     db.query.auditLighthouseResults.findMany({
       where: eq(auditLighthouseResults.auditId, auditId),

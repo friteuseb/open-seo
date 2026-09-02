@@ -1,0 +1,1 @@
+ALTER TABLE "audit_pages" ADD COLUMN "content_excerpt" text;
