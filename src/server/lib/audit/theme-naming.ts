@@ -17,8 +17,14 @@ import { getOptionalEnvValue } from "@/server/lib/runtime-env";
 const TITLES_PER_CLUSTER = 6;
 const MAX_TITLE_LENGTH = 80;
 const MAX_LABEL_LENGTH = 40;
-/** One model call for every cluster at once, so it can keep the names distinct. */
 const REQUEST_TIMEOUT_MS = 120_000;
+/**
+ * Clusters named per call. Enough that the model can keep names distinct
+ * within a batch, few enough that a slow hosted model still answers inside the
+ * timeout — 40 sub-clusters in one prompt silently timed out on OpenRouter,
+ * leaving the drill-down on raw keyword labels.
+ */
+const CLUSTERS_PER_CALL = 10;
 
 export interface ClusterToName {
   themeId: number;
@@ -156,6 +162,22 @@ export async function nameThemeClusters(
   const config = await getNamingConfig();
   if (!config) return null;
 
+  const labels = new Map<number, string>();
+  for (let i = 0; i < clusters.length; i += CLUSTERS_PER_CALL) {
+    const batch = clusters.slice(i, i + CLUSTERS_PER_CALL);
+    const named = await nameBatch(batch, config);
+    // A failed batch leaves its clusters on their keyword labels; the rest
+    // still get names, rather than the whole pass falling back.
+    if (named) for (const [id, label] of named) labels.set(id, label);
+  }
+
+  return labels.size > 0 ? labels : null;
+}
+
+async function nameBatch(
+  clusters: ClusterToName[],
+  config: { baseUrl: string; model: string; apiKey: string | null },
+): Promise<Map<number, string> | null> {
   try {
     const response = await fetch(chatCompletionsUrl(config.baseUrl), {
       method: "POST",

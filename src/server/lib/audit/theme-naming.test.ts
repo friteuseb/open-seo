@@ -105,6 +105,20 @@ describe("nameThemeClusters", () => {
     expect(calls[0].headers.authorization).toBe("Bearer sk-test");
   });
 
+  it("names in batches, so one slow answer cannot lose every label", async () => {
+    const many: ClusterToName[] = Array.from({ length: 14 }, (_, n) => ({
+      themeId: n,
+      keywordLabel: `mot${n}`,
+      pageTitles: [`Titre ${n}`],
+    }));
+    const calls = answers('{"0": "Un nom"}');
+
+    await nameThemeClusters(many);
+
+    // 14 clusters at 10 per call.
+    expect(calls).toHaveLength(2);
+  });
+
   it("stays off when nothing at all is configured", async () => {
     mocks.getOptionalEnvValue.mockResolvedValue(undefined);
     const fetchSpy = vi.fn();
