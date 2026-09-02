@@ -309,6 +309,10 @@ function emptyPageResult(input: {
  * Topically-similar page pairs for the internal-linking analysis, scored on
  * embeddings when the deployment provides an endpoint and on TF-IDF otherwise.
  * embedTexts already swallows endpoint failures, so this never fails the audit.
+ *
+ * The vectors are returned alongside the pairs so the theme clustering can
+ * reuse them: embedding a large site is the expensive part of finalize, and
+ * doing it twice would double it for the same answer.
  */
 export async function findSimilarPagesForAudit(
   pages: Array<
@@ -319,13 +323,16 @@ export async function findSimilarPagesForAudit(
   >,
 ) {
   const vectors = await embedTexts(pages.map(buildPageEmbeddingText));
-  if (!vectors) return findSimilarPagePairs(pages);
+  if (!vectors) return { pairs: findSimilarPagePairs(pages), vectors: null };
 
-  return findSimilarPagePairsFromVectors(
-    pages.map((page, index) => ({
-      pageId: page.pageId,
-      url: page.url,
-      vector: vectors[index],
-    })),
-  );
+  return {
+    pairs: findSimilarPagePairsFromVectors(
+      pages.map((page, index) => ({
+        pageId: page.pageId,
+        url: page.url,
+        vector: vectors[index],
+      })),
+    ),
+    vectors,
+  };
 }

@@ -1,5 +1,6 @@
 import type { WorkflowStep } from "cloudflare:workers";
 import { findSimilarPagesForAudit } from "./site-audit-workflow-helpers";
+import { assignPageThemes } from "@/server/lib/audit/theme-clustering";
 import type { BillingCustomerContext } from "@/server/billing/subscription";
 import { discoverUrls, parseRobotsTxt } from "@/server/lib/audit/discovery";
 import {
@@ -428,8 +429,16 @@ async function runInternalLinkingAnalysis(
   auditId: string,
 ): Promise<DetectedIssue[]> {
   const pages = await LinkGraphRepository.getPagesForSimilarity(auditId);
-  const candidatePairs = await findSimilarPagesForAudit(pages);
+  const { pairs: candidatePairs, vectors } =
+    await findSimilarPagesForAudit(pages);
   if (candidatePairs.length === 0 && pages.length === 0) return [];
+
+  // Topical clusters colour the internal-linking graph. Reuses the embeddings
+  // computed just above, and degrades to keyword grouping without them.
+  const themes = assignPageThemes(pages, vectors);
+  if (themes.length > 0) {
+    await LinkGraphRepository.updatePageThemes(auditId, themes);
+  }
 
   const { pageMetrics, missingLinkPairs } = await getAuditScratchpad(
     auditId,

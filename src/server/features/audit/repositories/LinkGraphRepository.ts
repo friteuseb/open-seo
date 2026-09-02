@@ -75,7 +75,23 @@ async function updateLinkGraphMetrics(
   );
 }
 
+/** Persist the topical clusters computed at finalize (see theme-clustering.ts). */
+async function updatePageThemes(
+  auditId: string,
+  themes: Array<{ pageId: string; themeId: number; themeLabel: string }>,
+) {
+  await executeInBatches(themes, (tx, theme) =>
+    tx
+      .update(auditPages)
+      .set({ themeId: theme.themeId, themeLabel: theme.themeLabel })
+      .where(
+        and(eq(auditPages.auditId, auditId), eq(auditPages.id, theme.pageId)),
+      ),
+  );
+}
+
 export const LinkGraphRepository = {
   getPagesForSimilarity,
   updateLinkGraphMetrics,
+  updatePageThemes,
 } as const;

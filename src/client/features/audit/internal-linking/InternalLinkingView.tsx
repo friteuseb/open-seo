@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { sort } from "remeda";
 import { Network, TriangleAlert } from "lucide-react";
 import { SafeExternalLink } from "@/client/components/SafeExternalLink";
@@ -9,6 +9,7 @@ import {
 import type { AuditResultsData } from "@/client/features/audit/results/types";
 import {
   InternalLinkingGraph,
+  themeColorForId,
   type GraphEdge,
   type GraphNode,
 } from "@/client/features/audit/internal-linking/InternalLinkingGraph";
@@ -71,6 +72,49 @@ function parseBrokenLinkDetails(issue: AuditIssue): BrokenLinkDetails | null {
   }
 }
 
+/**
+ * Names the colours. Without it the clusters are decoration: the reader can
+ * see that two pages differ but not what separates them.
+ */
+function ThemeLegend({ nodes }: { nodes: GraphNode[] }) {
+  const themes = useMemo(() => {
+    const byId = new Map<number, { label: string; count: number }>();
+    for (const node of nodes) {
+      if (node.themeId == null || !node.themeLabel) continue;
+      const entry = byId.get(node.themeId) ?? {
+        label: node.themeLabel,
+        count: 0,
+      };
+      entry.count += 1;
+      byId.set(node.themeId, entry);
+    }
+    return sort(
+      Array.from(byId.entries()).map(([id, entry]) => ({ id, ...entry })),
+      (a, b) => b.count - a.count,
+    );
+  }, [nodes]);
+
+  if (themes.length === 0) return null;
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-base-300 bg-base-200/20 px-3 py-2">
+      <span className="text-xs font-medium uppercase tracking-wide text-base-content/60">
+        Topics
+      </span>
+      {themes.map((theme) => (
+        <span key={theme.id} className="flex items-center gap-1.5 text-xs">
+          <span
+            className="size-2.5 rounded-full"
+            style={{ backgroundColor: themeColorForId(theme.id) }}
+          />
+          <span className="text-base-content/80">{theme.label}</span>
+          <span className="text-base-content/40">{theme.count}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 export function InternalLinkingView({
   pages,
   issues,
@@ -79,6 +123,18 @@ export function InternalLinkingView({
   issues: AuditIssue[];
 }) {
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
+  // Right-click hides a page so a dense graph can be read. Hidden, not
+  // dropped: the audit's data is untouched and one click brings them back.
+  const [hiddenUrls, setHiddenUrls] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+
+  const hideNode = useCallback((node: GraphNode) => {
+    setHiddenUrls((current) => new Set(current).add(node.id));
+    setSelectedNode((current) => (current?.id === node.id ? null : current));
+  }, []);
+
+  const showAllNodes = useCallback(() => setHiddenUrls(new Set()), []);
 
   const pagesByUrl = useMemo(
     () => new Map(pages.map((page) => [page.url, page])),
@@ -134,6 +190,8 @@ export function InternalLinkingView({
       inboundLinkCount: page.inboundLinkCount ?? 0,
       pagerank: page.pagerank ?? 0,
       isOrphan: (page.inboundLinkCount ?? 0) === 0,
+      themeId: page.themeId ?? null,
+      themeLabel: page.themeLabel ?? null,
     }));
 
     const graphEdges: GraphEdge[] = [];
@@ -160,6 +218,22 @@ export function InternalLinkingView({
     return { nodes: graphNodes, edges: graphEdges };
   }, [pages, pagesByUrl, brokenLinks, suggestions]);
 
+  // An edge to a hidden page would dangle, so both ends must still be visible.
+  const { visibleNodes, visibleEdges } = useMemo(() => {
+    if (hiddenUrls.size === 0)
+      return { visibleNodes: nodes, visibleEdges: edges };
+    return {
+      visibleNodes: nodes.filter((node) => !hiddenUrls.has(node.id)),
+      visibleEdges: edges.filter(
+        (edge) =>
+          typeof edge.source === "string" &&
+          typeof edge.target === "string" &&
+          !hiddenUrls.has(edge.source) &&
+          !hiddenUrls.has(edge.target),
+      ),
+    };
+  }, [nodes, edges, hiddenUrls]);
+
   if (!hasGraphMetrics) {
     return (
       <div className="flex items-start gap-3 rounded-lg border border-base-300 bg-base-200/40 px-4 py-3 text-sm text-base-content/70">
@@ -182,10 +256,24 @@ export function InternalLinkingView({
       />
 
       <InternalLinkingGraph
-        nodes={nodes}
-        edges={edges}
+        nodes={visibleNodes}
+        edges={visibleEdges}
         onNodeClick={setSelectedNode}
+        onNodeHide={hideNode}
       />
+
+      <div className="flex flex-wrap items-center gap-3">
+        <ThemeLegend nodes={visibleNodes} />
+        {hiddenUrls.size > 0 && (
+          <button className="btn btn-ghost btn-xs" onClick={showAllNodes}>
+            Show {hiddenUrls.size} hidden page
+            {hiddenUrls.size === 1 ? "" : "s"}
+          </button>
+        )}
+      </div>
+      <p className="text-xs text-base-content/50">
+        Click a node for details · right-click to hide it · scroll to zoom
+      </p>
 
       {selectedNode && (
         <div className="flex items-center justify-between rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-sm">
@@ -195,6 +283,7 @@ export function InternalLinkingView({
               {selectedNode.inboundLinkCount} inbound ·{" "}
               {(selectedNode.pagerank * 100).toFixed(2)} PageRank
               {selectedNode.isOrphan && " · orphaned"}
+              {selectedNode.themeLabel && ` · ${selectedNode.themeLabel}`}
             </p>
           </div>
           <SafeExternalLink

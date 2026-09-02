@@ -169,6 +169,13 @@
       "when": 1788334151737,
       "tag": "0023_dry_slyde",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1788340036105,
+      "tag": "0024_puzzling_corsair",
+      "breakpoints": true
     }
   ]
 }

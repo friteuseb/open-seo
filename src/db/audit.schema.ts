@@ -129,6 +129,10 @@ export const auditPages = sqliteTable(
     pagerank: real("pagerank"),
     centralityScore: real("centrality_score"),
     inboundLinkCount: integer("inbound_link_count"),
+    // Topical cluster assigned at finalize (see theme-clustering.ts). The id
+    // drives the graph's colours; the label names the cluster in the legend.
+    themeId: integer("theme_id"),
+    themeLabel: text("theme_label"),
   },
   (table) => [index("audit_pages_audit_url_idx").on(table.auditId, table.url)],
 );

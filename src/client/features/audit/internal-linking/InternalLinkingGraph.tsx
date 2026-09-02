@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { sort } from "remeda";
 import { drag, type D3DragEvent } from "d3-drag";
 import {
   forceCenter,
@@ -19,6 +20,9 @@ export interface GraphNode extends SimulationNodeDatum {
   inboundLinkCount: number;
   pagerank: number;
   isOrphan: boolean;
+  /** Topical cluster from the audit, or null when themes were not computed. */
+  themeId: number | null;
+  themeLabel: string | null;
 }
 
 export interface GraphEdge extends SimulationLinkDatum<GraphNode> {
@@ -28,6 +32,78 @@ export interface GraphEdge extends SimulationLinkDatum<GraphNode> {
 
 const NODE_RADIUS_RANGE: [number, number] = [6, 24];
 const CHARGE_STRENGTH = -260;
+/**
+ * Okabe-Ito, which stays distinguishable for the common forms of colour
+ * blindness — a categorical scheme has to survive being the only thing that
+ * separates two groups.
+ */
+const THEME_COLORS = [
+  "#0072b2",
+  "#e69f00",
+  "#009e73",
+  "#cc79a7",
+  "#56b4e9",
+  "#d55e00",
+  "#f0e442",
+  "#8c6bb1",
+  "#1b9e77",
+  "#a6761d",
+] as const;
+const UNTHEMED_COLOR = "#7a8394";
+/** Pull towards the cluster's centre of mass; gentle enough that link forces still shape the layout. */
+const CLUSTER_STRENGTH = 0.12;
+/** Below this zoom only the most linked pages are named, or labels overlap into mush. */
+const LABEL_ZOOM_THRESHOLD = 1.4;
+/** How many pages keep a permanent label at overview zoom. */
+const ALWAYS_LABELLED = 12;
+const LABEL_MAX_CHARS = 28;
+
+/** Shared with the legend so a swatch always matches its nodes. */
+export function themeColorForId(themeId: number | null): string {
+  if (themeId == null) return UNTHEMED_COLOR;
+  return THEME_COLORS[themeId % THEME_COLORS.length];
+}
+
+function themeColor(node: GraphNode): string {
+  return themeColorForId(node.themeId);
+}
+
+function truncate(text: string): string {
+  return text.length > LABEL_MAX_CHARS
+    ? `${text.slice(0, LABEL_MAX_CHARS - 1)}…`
+    : text;
+}
+
+/**
+ * Attracts each node towards its cluster's centre of mass, so pages on the
+ * same subject settle together instead of being scattered by the link force
+ * alone. Centres are recomputed every tick from the nodes themselves, so no
+ * fixed positions have to be invented for clusters.
+ */
+function forceCluster(nodes: GraphNode[], strength: number) {
+  return (alpha: number) => {
+    const sums = new Map<number, { x: number; y: number; count: number }>();
+    for (const node of nodes) {
+      if (node.themeId == null) continue;
+      const entry = sums.get(node.themeId) ?? { x: 0, y: 0, count: 0 };
+      entry.x += node.x ?? 0;
+      entry.y += node.y ?? 0;
+      entry.count += 1;
+      sums.set(node.themeId, entry);
+    }
+
+    for (const node of nodes) {
+      if (node.themeId == null) continue;
+      const centre = sums.get(node.themeId);
+      if (!centre || centre.count === 0) continue;
+      const pull = strength * alpha;
+      node.vx =
+        (node.vx ?? 0) + (centre.x / centre.count - (node.x ?? 0)) * pull;
+      node.vy =
+        (node.vy ?? 0) + (centre.y / centre.count - (node.y ?? 0)) * pull;
+    }
+  };
+}
 
 /** After the link force resolves ids to node objects; still a string/number before that happens. */
 function resolvedNode(
@@ -40,10 +116,13 @@ export function InternalLinkingGraph({
   nodes,
   edges,
   onNodeClick,
+  onNodeHide,
 }: {
   nodes: GraphNode[];
   edges: GraphEdge[];
   onNodeClick: (node: GraphNode) => void;
+  /** Right-click hides a node, to clear the view around what is being read. */
+  onNodeHide: (node: GraphNode) => void;
 }) {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -78,6 +157,14 @@ export function InternalLinkingGraph({
       .scaleExtent([0.2, 4])
       .on("zoom", (event: D3ZoomEvent<SVGSVGElement, unknown>) => {
         root.attr("transform", event.transform.toString());
+        // Every label at once is unreadable on a large site, so the long tail
+        // is revealed only once the view is zoomed in far enough to fit them.
+        const showAll = event.transform.k >= LABEL_ZOOM_THRESHOLD;
+        labelSelection.attr("opacity", (d) =>
+          showAll || alwaysLabelled.has(d.id) ? 1 : 0,
+        );
+        // Keep text legible at any zoom instead of scaling with the graph.
+        labelSelection.attr("font-size", 10 / Math.sqrt(event.transform.k));
       });
     svg.call(zoomBehavior);
     zoomBehavior.transform(svg, zoomIdentity);
@@ -125,16 +212,54 @@ export function InternalLinkingGraph({
       .data(simNodes)
       .join("circle")
       .attr("r", (d) => radiusScale(d.inboundLinkCount))
-      .attr("class", (d) =>
-        d.isOrphan
-          ? "fill-warning/70 stroke-warning cursor-pointer"
-          : "fill-primary/70 stroke-primary cursor-pointer",
-      )
-      .attr("stroke-width", 1.5)
+      .attr("class", "cursor-pointer")
+      .attr("fill", (d) => themeColor(d))
+      .attr("fill-opacity", 0.75)
+      // Orphans keep a distinct outline: colour now carries the topic, so
+      // "no inbound links" needs its own channel to stay visible.
+      .attr("stroke", (d) => (d.isOrphan ? "#d55e00" : themeColor(d)))
+      .attr("stroke-width", (d) => (d.isOrphan ? 2.5 : 1.5))
+      .attr("stroke-dasharray", (d) => (d.isOrphan ? "3 2" : null))
       .on("click", (_event, d) => onNodeClick(d))
+      .on("contextmenu", (event: MouseEvent, d) => {
+        // Suppress the browser menu: the gesture belongs to the graph here.
+        event.preventDefault();
+        onNodeHide(d);
+      })
       .call(dragBehavior);
 
-    nodeSelection.append("title").text((d) => `${d.title}\n${d.id}`);
+    nodeSelection
+      .append("title")
+      .text((d) =>
+        [d.title, d.id, d.themeLabel ? `Theme: ${d.themeLabel}` : null]
+          .filter(Boolean)
+          .join("\n"),
+      );
+
+    // Labels live in their own layer so they always paint above the nodes.
+    const rankedByLinks = sort(
+      simNodes,
+      (a, b) => b.inboundLinkCount - a.inboundLinkCount,
+    );
+    const alwaysLabelled = new Set(
+      rankedByLinks.slice(0, ALWAYS_LABELLED).map((node) => node.id),
+    );
+
+    const labelSelection = root
+      .append("g")
+      .attr("pointer-events", "none")
+      .selectAll<SVGTextElement, GraphNode>("text")
+      .data(simNodes)
+      .join("text")
+      .text((d) => truncate(d.title))
+      .attr("font-size", 10)
+      .attr("text-anchor", "middle")
+      .attr("class", "fill-base-content")
+      .attr("paint-order", "stroke")
+      .attr("stroke", "var(--fallback-b1,oklch(var(--b1)))")
+      .attr("stroke-width", 3)
+      .attr("stroke-linejoin", "round")
+      .attr("opacity", (d) => (alwaysLabelled.has(d.id) ? 1 : 0));
 
     const simulation = forceSimulation(simNodes)
       .force(
@@ -150,6 +275,10 @@ export function InternalLinkingGraph({
         forceCollide<GraphNode>((d) => radiusScale(d.inboundLinkCount) + 8),
       );
 
+    if (simNodes.some((node) => node.themeId != null)) {
+      simulation.force("cluster", forceCluster(simNodes, CLUSTER_STRENGTH));
+    }
+
     simulation.on("tick", () => {
       linkSelection
         .attr("x1", (d) => resolvedNode(d.source)?.x ?? 0)
@@ -157,12 +286,15 @@ export function InternalLinkingGraph({
         .attr("x2", (d) => resolvedNode(d.target)?.x ?? 0)
         .attr("y2", (d) => resolvedNode(d.target)?.y ?? 0);
       nodeSelection.attr("cx", (d) => d.x ?? 0).attr("cy", (d) => d.y ?? 0);
+      labelSelection
+        .attr("x", (d) => d.x ?? 0)
+        .attr("y", (d) => (d.y ?? 0) - radiusScale(d.inboundLinkCount) - 4);
     });
 
     return () => {
       simulation.stop();
     };
-  }, [nodes, edges, onNodeClick]);
+  }, [nodes, edges, onNodeClick, onNodeHide]);
 
   if (nodes.length === 0) {
     return (

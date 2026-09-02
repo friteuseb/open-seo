@@ -374,6 +374,10 @@ async function getAuditResultsForProject(auditId: string, projectId: string) {
   const [pages, lighthouse, issues] = await Promise.all([
     db.query.auditPages.findMany({
       where: eq(auditPages.auditId, auditId),
+      // keywordsJson exists for the finalize-time similarity pass only. It is
+      // the largest column on the row (~330KB across a 600-page audit) and no
+      // client reads it, so it never leaves the server.
+      columns: { keywordsJson: false },
     }),
     db.query.auditLighthouseResults.findMany({
       where: eq(auditLighthouseResults.auditId, auditId),
