@@ -1,6 +1,7 @@
 import type { WorkflowStep } from "cloudflare:workers";
 import { findSimilarPagesForAudit } from "./site-audit-workflow-helpers";
 import { assignPageThemes } from "@/server/lib/audit/theme-clustering";
+import { withModelNamedThemes } from "@/server/lib/audit/theme-naming";
 import type { BillingCustomerContext } from "@/server/billing/subscription";
 import { discoverUrls, parseRobotsTxt } from "@/server/lib/audit/discovery";
 import {
@@ -437,7 +438,10 @@ async function runInternalLinkingAnalysis(
   // computed just above, and degrades to keyword grouping without them.
   const themes = assignPageThemes(pages, vectors);
   if (themes.length > 0) {
-    await LinkGraphRepository.updatePageThemes(auditId, themes);
+    await LinkGraphRepository.updatePageThemes(
+      auditId,
+      await withModelNamedThemes(themes, pages),
+    );
   }
 
   const { pageMetrics, missingLinkPairs, edges } = await getAuditScratchpad(
