@@ -80,12 +80,23 @@ async function updateLinkGraphMetrics(
 /** Persist the topical clusters computed at finalize (see theme-clustering.ts). */
 async function updatePageThemes(
   auditId: string,
-  themes: Array<{ pageId: string; themeId: number; themeLabel: string }>,
+  themes: Array<{
+    pageId: string;
+    themeId: number;
+    themeLabel: string;
+    subThemeId: number | null;
+    subThemeLabel: string | null;
+  }>,
 ) {
   await executeInBatches(themes, (tx, theme) =>
     tx
       .update(auditPages)
-      .set({ themeId: theme.themeId, themeLabel: theme.themeLabel })
+      .set({
+        themeId: theme.themeId,
+        themeLabel: theme.themeLabel,
+        subThemeId: theme.subThemeId,
+        subThemeLabel: theme.subThemeLabel,
+      })
       .where(
         and(eq(auditPages.auditId, auditId), eq(auditPages.id, theme.pageId)),
       ),

@@ -138,6 +138,10 @@ export const auditPages = pgTable(
     // drives the graph's colours; the label names the cluster in the legend.
     themeId: integer("theme_id"),
     themeLabel: text("theme_label"),
+    // Sub-cluster within the theme, for drilling into a large one. Null when
+    // the theme was small enough to read whole.
+    subThemeId: integer("sub_theme_id"),
+    subThemeLabel: text("sub_theme_label"),
   },
   (table) => [index("audit_pages_audit_url_idx").on(table.auditId, table.url)],
 );

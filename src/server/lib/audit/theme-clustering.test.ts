@@ -143,6 +143,27 @@ describe("assignPageThemes without embeddings", () => {
     expect(label).toContain("semis");
   });
 
+  it("splits a large theme into sub-clusters, leaving small ones whole", () => {
+    // 24 pages on one subject, enough to cross MIN_PAGES_TO_SPLIT, plus a
+    // handful on another that must stay unsplit.
+    const big = Array.from({ length: 24 }, (_, n) =>
+      page(`big${n}`, [
+        ["tomates", 9],
+        [n < 12 ? "serre" : "plein-champ", 6],
+      ]),
+    );
+    const small = [
+      page("s1", [["mentions", 9]]),
+      page("s2", [["mentions", 8]]),
+    ];
+
+    const themes = assignPageThemes([...big, ...small], null);
+    const byPage = new Map(themes.map((t) => [t.pageId, t]));
+
+    expect(byPage.get("big0")?.subThemeId).not.toBeNull();
+    expect(byPage.get("s1")?.subThemeId).toBeNull();
+  });
+
   it("returns nothing for an audit with no pages", () => {
     expect(assignPageThemes([], null)).toEqual([]);
   });

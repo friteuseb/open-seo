@@ -11,38 +11,16 @@
 
 import { sort } from "remeda";
 import type { PageKeyword } from "@/server/lib/audit/keyword-extraction";
-
-export interface ClusterablePage {
-  pageId: string;
-  keywords: PageKeyword[];
-}
-
-interface PageTheme {
-  pageId: string;
-  /** Stable index of the cluster within this audit, for colour assignment. */
-  themeId: number;
-  /** Human-readable cluster name, derived from its most distinctive terms. */
-  themeLabel: string;
-}
+import { labelClusters } from "@/server/lib/audit/theme-labels";
 
 /**
- * Clusters stay readable on a legend and distinguishable by colour, so the
- * count is bounded regardless of site size.
+ * A theme is only split when it is big enough that a reader cannot take it in
+ * at once — below this, drilling in would just re-draw the same pages.
  */
-const MIN_CLUSTERS = 2;
-const MAX_CLUSTERS = 10;
-const MAX_ITERATIONS = 20;
-/** Terms joined into one label, e.g. "tomates · semis". */
-const TERMS_PER_LABEL = 2;
-/**
- * A term on more than this share of the audit's pages is the site's own
- * vocabulary — its brand, its tagline — not a subject that tells two clusters
- * apart. Naming a cluster after it says nothing ("papy · potager" on a site
- * called Papy Potager).
- */
-const MAX_DOCUMENT_RATIO = 0.4;
-/** Below this many pages a document ratio says nothing, so the guard is off. */
-const MIN_DOCUMENTS_FOR_RATIO = 5;
+const MIN_PAGES_TO_SPLIT = 20;
+/** Sub-clusters per theme: one per 25 pages, so a 160-page theme yields ~6. */
+const PAGES_PER_SUBCLUSTER = 25;
+const MAX_SUBCLUSTERS = 8;
 
 /**
  * Roughly one cluster per 30 pages, bounded. Coarser than this and a site
@@ -178,86 +156,33 @@ function kMeans(vectors: number[][], k: number): number[] {
   return assignments;
 }
 
-/** Approximates "same word" for labels: one term is a prefix of the other. */
-function sharesStem(a: string, b: string): boolean {
-  const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a];
-  return shorter.length >= 4 && longer.startsWith(shorter);
+export interface ClusterablePage {
+  pageId: string;
+  keywords: PageKeyword[];
+}
+
+interface PageTheme {
+  pageId: string;
+  /** Stable index of the cluster within this audit, for colour assignment. */
+  themeId: number;
+  /** Human-readable cluster name, derived from its most distinctive terms. */
+  themeLabel: string;
+  /**
+   * Index of the page's sub-cluster within its own theme, or null when the
+   * theme was too small to split. Lets the graph drill into a large theme
+   * without spending more colours on the top-level legend.
+   */
+  subThemeId: number | null;
+  subThemeLabel: string | null;
 }
 
 /**
- * Names a cluster after the terms that set it apart: a term's weight inside
- * the cluster over its weight across the whole audit. Plain frequency would
- * label every cluster with the site's own vocabulary ("page", the brand name).
+ * Clusters stay readable on a legend and distinguishable by colour, so the
+ * count is bounded regardless of site size.
  */
-function labelClusters(
-  pages: ClusterablePage[],
-  assignments: number[],
-  clusterCount: number,
-): string[] {
-  const globalWeight = new Map<string, number>();
-  const documentCount = new Map<string, number>();
-  const clusterWeights = Array.from(
-    { length: clusterCount },
-    () => new Map<string, number>(),
-  );
-
-  for (let i = 0; i < pages.length; i++) {
-    for (const { term, weight } of pages[i].keywords) {
-      globalWeight.set(term, (globalWeight.get(term) ?? 0) + weight);
-      documentCount.set(term, (documentCount.get(term) ?? 0) + 1);
-      const bucket = clusterWeights[assignments[i]];
-      bucket.set(term, (bucket.get(term) ?? 0) + weight);
-    }
-  }
-
-  const isSiteVocabulary = (term: string) =>
-    pages.length >= MIN_DOCUMENTS_FOR_RATIO &&
-    (documentCount.get(term) ?? 0) / pages.length > MAX_DOCUMENT_RATIO;
-
-  const used = new Set<string>();
-  return clusterWeights.map((weights) => {
-    const candidates = Array.from(weights.entries()).filter(
-      ([term]) => !isSiteVocabulary(term),
-    );
-    // A cluster whose every term is site-wide vocabulary still deserves a
-    // name; a weak label beats "Group 3".
-    const ranked = sort(
-      (candidates.length > 0 ? candidates : Array.from(weights.entries())).map(
-        ([term, weight]) => ({
-          term,
-          // Share of the term's site-wide weight that this cluster holds.
-          distinctiveness: weight / (globalWeight.get(term) ?? weight),
-          weight,
-        }),
-      ),
-      (a, b) =>
-        b.distinctiveness * b.weight - a.distinctiveness * a.weight ||
-        a.term.localeCompare(b.term),
-    );
-
-    const picked: string[] = [];
-    for (const { term } of ranked) {
-      // Two clusters sharing a headline term would be indistinguishable in the
-      // legend, so a term is spent once.
-      if (used.has(term)) continue;
-      // "tomates · tomate" spends both slots on one idea. Without a stemmer,
-      // treating one term as a prefix of another catches the plural and the
-      // common inflections that matter here.
-      if (picked.some((chosen) => sharesStem(chosen, term))) continue;
-      picked.push(term);
-      if (picked.length === TERMS_PER_LABEL) break;
-    }
-    // Last resort before a meaningless "Group 3": reuse a term another
-    // cluster already took. A repeated word still says more than a number.
-    if (picked.length === 0 && ranked.length > 0) picked.push(ranked[0].term);
-    for (const term of picked) used.add(term);
-
-    // Pages with no keywords at all are the redirects and 404s the crawl
-    // followed; saying so beats numbering them.
-    return picked.length > 0 ? picked.join(" · ") : "No page content";
-  });
-}
-
+const MIN_CLUSTERS = 2;
+const MAX_CLUSTERS = 10;
+const MAX_ITERATIONS = 20;
 /**
  * Fallback grouping when no embeddings are available: each page joins the
  * cluster of its own strongest term, keeping the most common such terms.
@@ -292,6 +217,66 @@ function clusterByKeywords(pages: ClusterablePage[]): number[] {
  * Assigns every page a topical cluster. `vectors` must be aligned with
  * `pages`; pass null when the deployment has no embedding endpoint.
  */
+/**
+ * Splits each large theme into sub-clusters, so a reader can drill into
+ * "Semis et plantation" and find the water plants inside it. Runs the same
+ * k-means within a single theme's pages, which is why a small section can
+ * surface here without spending one of the ten top-level colours on it.
+ *
+ * Returns one entry per page index, null for pages in themes left whole.
+ */
+function assignSubThemes(
+  pages: ClusterablePage[],
+  vectors: number[][] | null,
+  assignments: number[],
+): Array<{ subThemeId: number; subThemeLabel: string } | null> {
+  const result = Array.from<{
+    subThemeId: number;
+    subThemeLabel: string;
+  } | null>({ length: pages.length }).fill(null);
+
+  const indexesByTheme = new Map<number, number[]>();
+  for (let i = 0; i < assignments.length; i++) {
+    const bucket = indexesByTheme.get(assignments[i]) ?? [];
+    bucket.push(i);
+    indexesByTheme.set(assignments[i], bucket);
+  }
+
+  for (const indexes of indexesByTheme.values()) {
+    if (indexes.length < MIN_PAGES_TO_SPLIT) continue;
+
+    const subCount = Math.max(
+      2,
+      Math.min(
+        MAX_SUBCLUSTERS,
+        Math.round(indexes.length / PAGES_PER_SUBCLUSTER),
+      ),
+    );
+    const themePages = indexes.map((i) => pages[i]);
+    const subAssignments = vectors
+      ? kMeans(
+          indexes.map((i) => vectors[i]),
+          subCount,
+        )
+      : clusterByKeywords(themePages);
+
+    const subLabels = labelClusters(
+      themePages,
+      subAssignments,
+      Math.max(subCount, Math.max(0, ...subAssignments) + 1),
+    );
+
+    for (let n = 0; n < indexes.length; n++) {
+      result[indexes[n]] = {
+        subThemeId: subAssignments[n],
+        subThemeLabel: subLabels[subAssignments[n]],
+      };
+    }
+  }
+
+  return result;
+}
+
 export function assignPageThemes(
   pages: ClusterablePage[],
   vectors: number[][] | null,
@@ -315,10 +300,13 @@ export function assignPageThemes(
     assignments,
     Math.max(clusterCount, Math.max(0, ...assignments) + 1),
   );
+  const subThemes = assignSubThemes(pages, usableVectors, assignments);
 
   return pages.map((page, index) => ({
     pageId: page.pageId,
     themeId: assignments[index],
     themeLabel: labels[assignments[index]],
+    subThemeId: subThemes[index]?.subThemeId ?? null,
+    subThemeLabel: subThemes[index]?.subThemeLabel ?? null,
   }));
 }

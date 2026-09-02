@@ -7,115 +7,24 @@ import {
   truncateMiddle,
 } from "@/client/features/backlinks/backlinksPageUtils";
 import type { AuditResultsData } from "@/client/features/audit/results/types";
+import { ThemeLegend } from "@/client/features/audit/internal-linking/ThemeLegend";
 import {
   InternalLinkingGraph,
-  themeColorForId,
   type GraphEdge,
   type GraphLayout,
   type GraphNode,
 } from "@/client/features/audit/internal-linking/InternalLinkingGraph";
 
+import {
+  parseBrokenLinkDetails,
+  parseLinkSuggestionDetails,
+  type BrokenLinkDetails,
+  type LinkSuggestionDetails,
+} from "@/client/features/audit/internal-linking/issue-details";
+
 type AuditPage = AuditResultsData["pages"][number];
 type AuditLink = AuditResultsData["links"][number];
 type AuditIssue = AuditResultsData["issues"][number];
-
-interface LinkSuggestionDetails {
-  targetUrl: string;
-  similarityScore: number;
-}
-
-interface BrokenLinkDetails {
-  targetUrl: string;
-  targetStatus: number;
-}
-
-function parseLinkSuggestionDetails(
-  issue: AuditIssue,
-): LinkSuggestionDetails | null {
-  if (!issue.detailsJson) return null;
-  try {
-    const parsed: unknown = JSON.parse(issue.detailsJson);
-    if (
-      parsed &&
-      typeof parsed === "object" &&
-      "targetUrl" in parsed &&
-      "similarityScore" in parsed &&
-      typeof parsed.targetUrl === "string" &&
-      typeof parsed.similarityScore === "number"
-    ) {
-      return {
-        targetUrl: parsed.targetUrl,
-        similarityScore: parsed.similarityScore,
-      };
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-function parseBrokenLinkDetails(issue: AuditIssue): BrokenLinkDetails | null {
-  if (!issue.detailsJson) return null;
-  try {
-    const parsed: unknown = JSON.parse(issue.detailsJson);
-    if (
-      parsed &&
-      typeof parsed === "object" &&
-      "targetUrl" in parsed &&
-      "targetStatus" in parsed &&
-      typeof parsed.targetUrl === "string" &&
-      typeof parsed.targetStatus === "number"
-    ) {
-      return { targetUrl: parsed.targetUrl, targetStatus: parsed.targetStatus };
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Names the colours. Without it the clusters are decoration: the reader can
- * see that two pages differ but not what separates them.
- */
-function ThemeLegend({ nodes }: { nodes: GraphNode[] }) {
-  const themes = useMemo(() => {
-    const byId = new Map<number, { label: string; count: number }>();
-    for (const node of nodes) {
-      if (node.themeId == null || !node.themeLabel) continue;
-      const entry = byId.get(node.themeId) ?? {
-        label: node.themeLabel,
-        count: 0,
-      };
-      entry.count += 1;
-      byId.set(node.themeId, entry);
-    }
-    return sort(
-      Array.from(byId.entries()).map(([id, entry]) => ({ id, ...entry })),
-      (a, b) => b.count - a.count,
-    );
-  }, [nodes]);
-
-  if (themes.length === 0) return null;
-
-  return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-base-300 bg-base-200/20 px-3 py-2">
-      <span className="text-xs font-medium uppercase tracking-wide text-base-content/60">
-        Topics
-      </span>
-      {themes.map((theme) => (
-        <span key={theme.id} className="flex items-center gap-1.5 text-xs">
-          <span
-            className="size-2.5 rounded-full"
-            style={{ backgroundColor: themeColorForId(theme.id) }}
-          />
-          <span className="text-base-content/80">{theme.label}</span>
-          <span className="text-base-content/40">{theme.count}</span>
-        </span>
-      ))}
-    </div>
-  );
-}
 
 export function InternalLinkingView({
   pages,
@@ -131,6 +40,10 @@ export function InternalLinkingView({
   // reading of that, not a replacement for it. "links" keeps the layout
   // driven purely by the link forces, "topics" pulls each cluster together.
   const [layout, setLayout] = useState<GraphLayout>("links");
+  // Drilling into one theme: its pages are recoloured by sub-cluster and the
+  // rest of the site greys out. Keeps small sections findable without giving
+  // them one of the ten top-level colours.
+  const [drilledTheme, setDrilledTheme] = useState<number | null>(null);
   // Right-click hides a page so a dense graph can be read. Hidden, not
   // dropped: the audit's data is untouched and one click brings them back.
   const [hiddenUrls, setHiddenUrls] = useState<ReadonlySet<string>>(
@@ -200,6 +113,8 @@ export function InternalLinkingView({
       isOrphan: (page.inboundLinkCount ?? 0) === 0,
       themeId: page.themeId ?? null,
       themeLabel: page.themeLabel ?? null,
+      subThemeId: page.subThemeId ?? null,
+      subThemeLabel: page.subThemeLabel ?? null,
     }));
 
     const graphEdges: GraphEdge[] = [];
@@ -233,17 +148,42 @@ export function InternalLinkingView({
     return { nodes: graphNodes, edges: graphEdges };
   }, [pages, pagesByUrl, brokenLinks, suggestions, links]);
 
+  // Only themes the audit actually split can be drilled into.
+  const splittableThemes = useMemo(() => {
+    const ids = new Set<number>();
+    for (const node of nodes) {
+      if (node.themeId != null && node.subThemeId != null)
+        ids.add(node.themeId);
+    }
+    return ids;
+  }, [nodes]);
+
   const internalEdgeCount = useMemo(
     () => edges.filter((edge) => edge.kind === "internal").length,
     [edges],
   );
 
+  // Inside a theme, colour by sub-cluster and grey out everything else, so the
+  // drill-down reads as "zooming in" rather than as a different graph.
+  const drilledNodes = useMemo(() => {
+    if (drilledTheme == null) return nodes;
+    return nodes.map((node) =>
+      node.themeId === drilledTheme
+        ? {
+            ...node,
+            themeId: node.subThemeId,
+            themeLabel: node.subThemeLabel,
+          }
+        : { ...node, themeId: null, themeLabel: null },
+    );
+  }, [nodes, drilledTheme]);
+
   // An edge to a hidden page would dangle, so both ends must still be visible.
   const { visibleNodes, visibleEdges } = useMemo(() => {
     if (hiddenUrls.size === 0)
-      return { visibleNodes: nodes, visibleEdges: edges };
+      return { visibleNodes: drilledNodes, visibleEdges: edges };
     return {
-      visibleNodes: nodes.filter((node) => !hiddenUrls.has(node.id)),
+      visibleNodes: drilledNodes.filter((node) => !hiddenUrls.has(node.id)),
       visibleEdges: edges.filter(
         (edge) =>
           typeof edge.source === "string" &&
@@ -252,7 +192,7 @@ export function InternalLinkingView({
           !hiddenUrls.has(edge.target),
       ),
     };
-  }, [nodes, edges, hiddenUrls]);
+  }, [drilledNodes, edges, hiddenUrls]);
 
   if (!hasGraphMetrics) {
     return (
@@ -306,7 +246,19 @@ export function InternalLinkingView({
       />
 
       <div className="flex flex-wrap items-center gap-3">
-        <ThemeLegend nodes={visibleNodes} />
+        <ThemeLegend
+          nodes={visibleNodes}
+          splittableThemes={splittableThemes}
+          onDrillInto={drilledTheme == null ? setDrilledTheme : undefined}
+        />
+        {drilledTheme != null && (
+          <button
+            className="btn btn-ghost btn-xs"
+            onClick={() => setDrilledTheme(null)}
+          >
+            ← All topics
+          </button>
+        )}
         {hiddenUrls.size > 0 && (
           <button className="btn btn-ghost btn-xs" onClick={showAllNodes}>
             Show {hiddenUrls.size} hidden page

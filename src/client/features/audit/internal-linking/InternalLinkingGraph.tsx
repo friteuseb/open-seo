@@ -23,6 +23,9 @@ export interface GraphNode extends SimulationNodeDatum {
   /** Topical cluster from the audit, or null when themes were not computed. */
   themeId: number | null;
   themeLabel: string | null;
+  /** Sub-cluster inside that theme, when the theme was large enough to split. */
+  subThemeId: number | null;
+  subThemeLabel: string | null;
 }
 
 export interface GraphEdge extends SimulationLinkDatum<GraphNode> {
