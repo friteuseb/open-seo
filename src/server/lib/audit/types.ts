@@ -49,6 +49,12 @@ export interface PageLink {
   anchor: string | null;
   isInternal: boolean;
   isNofollow: boolean;
+  /**
+   * The link sits in navigation chrome (menu, footer, sidebar) rather than in
+   * the page's body. Boilerplate links are kept out of the link graph's
+   * metrics — see link-placement.ts.
+   */
+  isBoilerplate: boolean;
 }
 
 /** Data extracted from a single page's HTML. */

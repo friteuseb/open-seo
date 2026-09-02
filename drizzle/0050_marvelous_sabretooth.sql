@@ -1,0 +1,1 @@
+ALTER TABLE `audit_links` ADD `is_boilerplate` integer DEFAULT false NOT NULL;

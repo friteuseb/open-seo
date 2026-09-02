@@ -12,6 +12,7 @@ const HEALTHY_LINK: PageLink = {
   anchor: "Catalog",
   isInternal: true,
   isNofollow: false,
+  isBoilerplate: false,
 };
 
 function makePage(overrides: Partial<CrawledPageResult>): CrawledPageResult {

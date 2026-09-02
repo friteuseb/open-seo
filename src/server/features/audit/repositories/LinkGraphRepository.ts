@@ -112,7 +112,11 @@ async function updatePageThemes(
  */
 async function replaceLinks(
   auditId: string,
-  edges: Array<{ sourcePageId: string; targetPageId: string }>,
+  edges: Array<{
+    sourcePageId: string;
+    targetPageId: string;
+    isBoilerplate: boolean;
+  }>,
 ) {
   await db.delete(auditLinks).where(eq(auditLinks.auditId, auditId));
   if (edges.length === 0) return;
@@ -123,6 +127,7 @@ async function replaceLinks(
       auditId,
       sourcePageId: edge.sourcePageId,
       targetPageId: edge.targetPageId,
+      isBoilerplate: edge.isBoilerplate,
     }),
   );
 }
@@ -133,6 +138,7 @@ async function getLinks(auditId: string) {
     .select({
       sourcePageId: auditLinks.sourcePageId,
       targetPageId: auditLinks.targetPageId,
+      isBoilerplate: auditLinks.isBoilerplate,
     })
     .from(auditLinks)
     .where(eq(auditLinks.auditId, auditId));
