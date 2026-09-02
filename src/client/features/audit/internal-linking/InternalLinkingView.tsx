@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { sort } from "remeda";
 import { Network, TriangleAlert } from "lucide-react";
 import { SafeExternalLink } from "@/client/components/SafeExternalLink";
 import {
@@ -86,19 +87,21 @@ export function InternalLinkingView({
 
   const suggestions = useMemo(
     () =>
-      issues
-        .filter((issue) => issue.issueType === "internal-linking-opportunity")
-        .map((issue) => ({
-          issue,
-          details: parseLinkSuggestionDetails(issue),
-        }))
-        .filter(
-          (row): row is { issue: AuditIssue; details: LinkSuggestionDetails } =>
-            row.details !== null,
-        )
-        .toSorted(
-          (a, b) => b.details.similarityScore - a.details.similarityScore,
-        ),
+      sort(
+        issues
+          .filter((issue) => issue.issueType === "internal-linking-opportunity")
+          .map((issue) => ({
+            issue,
+            details: parseLinkSuggestionDetails(issue),
+          }))
+          .filter(
+            (
+              row,
+            ): row is { issue: AuditIssue; details: LinkSuggestionDetails } =>
+              row.details !== null,
+          ),
+        (a, b) => b.details.similarityScore - a.details.similarityScore,
+      ),
     [issues],
   );
 

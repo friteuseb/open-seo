@@ -5,6 +5,8 @@
  * only contributes its top ~20 terms) — deliberately cheap enough to run
  * over an entire audit's pages in one finalize step.
  */
+
+import { sort } from "remeda";
 import type { PageKeyword } from "@/server/lib/audit/keyword-extraction";
 
 export interface SimilarityCandidatePage {
@@ -90,7 +92,7 @@ function collectPairs(
   const result: SimilarPagePair[] = [];
   for (const pairs of pairsBySource.values()) {
     result.push(
-      ...pairs.toSorted((a, b) => b.score - a.score).slice(0, maxPerPage),
+      ...sort(pairs, (a, b) => b.score - a.score).slice(0, maxPerPage),
     );
   }
   return result;

@@ -8,6 +8,8 @@
  * uses to bias term frequency toward the fields that best describe a page.
  */
 
+import { sort } from "remeda";
+
 const STOPWORDS = new Set([
   // English
   "a",
@@ -136,9 +138,12 @@ export function extractPageKeywords(fields: WeightedField[]): PageKeyword[] {
     }
   }
 
-  return Array.from(scores.entries())
-    .filter(([, weight]) => weight >= MIN_FREQUENCY)
-    .toSorted((a, b) => b[1] - a[1])
+  return sort(
+    Array.from(scores.entries()).filter(
+      ([, weight]) => weight >= MIN_FREQUENCY,
+    ),
+    (a, b) => b[1] - a[1],
+  )
     .slice(0, MAX_KEYWORDS)
     .map(([term, weight]) => ({ term, weight }));
 }
