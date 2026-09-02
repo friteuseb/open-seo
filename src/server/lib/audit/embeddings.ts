@@ -15,7 +15,7 @@ const embedResponseSchema = z.object({
  * OpenAI/Ollama-style embedding endpoint. Absent means the caller keeps its
  * existing TF-IDF path — embeddings are an upgrade, never a requirement.
  */
-export async function getEmbeddingsConfig(): Promise<{
+async function getEmbeddingsConfig(): Promise<{
   baseUrl: string;
   model: string;
 } | null> {

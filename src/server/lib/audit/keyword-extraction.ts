@@ -98,7 +98,7 @@ const MAX_TERM_LENGTH = 30;
 const MAX_KEYWORDS = 20;
 const MIN_FREQUENCY = 2;
 
-export interface WeightedField {
+interface WeightedField {
   text: string;
   weight: number;
 }

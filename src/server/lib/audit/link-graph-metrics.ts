@@ -5,7 +5,7 @@
  * no DO/SQLite dependency itself, so it's unit-testable in isolation.
  */
 
-export interface LinkGraphEdge {
+interface LinkGraphEdge {
   sourcePageId: string;
   targetPageId: string;
 }
@@ -18,7 +18,7 @@ export interface PageLinkMetrics {
   centralityScore: number;
 }
 
-export interface LinkGraphStats {
+interface LinkGraphStats {
   totalPages: number;
   totalLinks: number;
   orphanedPages: number;

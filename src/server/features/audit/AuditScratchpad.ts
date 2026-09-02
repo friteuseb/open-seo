@@ -87,7 +87,7 @@ interface OrphanPageRow {
   url: string;
 }
 
-export interface SimilarityCandidate {
+interface SimilarityCandidate {
   sourcePageId: string;
   sourceUrl: string;
   targetPageId: string;
@@ -95,7 +95,7 @@ export interface SimilarityCandidate {
   score: number;
 }
 
-export interface LinkGraphAnalysis {
+interface LinkGraphAnalysis {
   /** null when the crawl's link storage budget was exceeded (see recordBatch) — the edge set is incomplete, so metrics would be misleading. */
   pageMetrics: PageLinkMetrics[] | null;
   /** `candidates` filtered down to pairs with no existing edge between them. */

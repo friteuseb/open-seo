@@ -15,7 +15,7 @@ export interface SimilarityCandidatePage {
   keywords: PageKeyword[];
 }
 
-export interface SimilarPagePair {
+interface SimilarPagePair {
   sourcePageId: string;
   sourceUrl: string;
   targetPageId: string;
@@ -33,7 +33,7 @@ const DEFAULT_MAX_PER_PAGE = 5;
  */
 const DEFAULT_EMBEDDING_THRESHOLD = 0.75;
 
-export interface EmbeddedCandidatePage {
+interface EmbeddedCandidatePage {
   pageId: string;
   url: string;
   vector: number[];
