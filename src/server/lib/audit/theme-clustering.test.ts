@@ -104,30 +104,42 @@ describe("assignPageThemes without embeddings", () => {
   });
 
   it("does not name a cluster after the site's own vocabulary", () => {
-    // "papy" is on every page (the brand); only the subject words separate
-    // one cluster from the other.
-    const pages = [
-      page("p1", [
-        ["papy", 9],
-        ["tomates", 8],
-      ]),
-      page("p2", [
-        ["papy", 9],
-        ["tomates", 7],
-      ]),
-      page("p3", [
-        ["papy", 9],
-        ["mentions", 8],
-      ]),
-      page("p4", [
-        ["papy", 9],
-        ["mentions", 7],
-      ]),
-    ];
+    // "papy" is the brand: on every page, so on far more than
+    // MAX_DOCUMENT_RATIO of them, while each subject sits on a third.
+    const subjects = ["tomates", "mentions", "semis"];
+    const pages = subjects.flatMap((subject, group) =>
+      [0, 1, 2].map((n) =>
+        page(`p${group}${n}`, [
+          [subject, 9],
+          ["papy", 5],
+        ]),
+      ),
+    );
 
     const labels = assignPageThemes(pages, null).map((t) => t.themeLabel);
 
     expect(labels.every((label) => !label.includes("papy"))).toBe(true);
+    expect(labels.join(" ")).toMatch(/tomates|mentions|semis/);
+  });
+
+  it("does not spend both label slots on one word's singular and plural", () => {
+    const pages = [
+      page("p1", [
+        ["tomates", 9],
+        ["tomate", 8],
+        ["semis", 6],
+      ]),
+      page("p2", [
+        ["tomates", 9],
+        ["tomate", 7],
+        ["semis", 5],
+      ]),
+    ];
+
+    const label = assignPageThemes(pages, null)[0].themeLabel;
+
+    expect(label).toContain("tomate");
+    expect(label).toContain("semis");
   });
 
   it("returns nothing for an audit with no pages", () => {

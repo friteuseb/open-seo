@@ -41,6 +41,8 @@ const TERMS_PER_LABEL = 2;
  * called Papy Potager).
  */
 const MAX_DOCUMENT_RATIO = 0.4;
+/** Below this many pages a document ratio says nothing, so the guard is off. */
+const MIN_DOCUMENTS_FOR_RATIO = 5;
 
 /**
  * Roughly one cluster per 60 pages, bounded. Enough separation to be useful
@@ -173,6 +175,12 @@ function kMeans(vectors: number[][], k: number): number[] {
   return assignments;
 }
 
+/** Approximates "same word" for labels: one term is a prefix of the other. */
+function sharesStem(a: string, b: string): boolean {
+  const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a];
+  return shorter.length >= 4 && longer.startsWith(shorter);
+}
+
 /**
  * Names a cluster after the terms that set it apart: a term's weight inside
  * the cluster over its weight across the whole audit. Plain frequency would
@@ -200,19 +208,25 @@ function labelClusters(
   }
 
   const isSiteVocabulary = (term: string) =>
+    pages.length >= MIN_DOCUMENTS_FOR_RATIO &&
     (documentCount.get(term) ?? 0) / pages.length > MAX_DOCUMENT_RATIO;
 
   const used = new Set<string>();
   return clusterWeights.map((weights, cluster) => {
+    const candidates = Array.from(weights.entries()).filter(
+      ([term]) => !isSiteVocabulary(term),
+    );
+    // A cluster whose every term is site-wide vocabulary still deserves a
+    // name; a weak label beats "Group 3".
     const ranked = sort(
-      Array.from(weights.entries())
-        .filter(([term]) => !isSiteVocabulary(term))
-        .map(([term, weight]) => ({
+      (candidates.length > 0 ? candidates : Array.from(weights.entries())).map(
+        ([term, weight]) => ({
           term,
           // Share of the term's site-wide weight that this cluster holds.
           distinctiveness: weight / (globalWeight.get(term) ?? weight),
           weight,
-        })),
+        }),
+      ),
       (a, b) =>
         b.distinctiveness * b.weight - a.distinctiveness * a.weight ||
         a.term.localeCompare(b.term),
@@ -223,6 +237,10 @@ function labelClusters(
       // Two clusters sharing a headline term would be indistinguishable in the
       // legend, so a term is spent once.
       if (used.has(term)) continue;
+      // "tomates · tomate" spends both slots on one idea. Without a stemmer,
+      // treating one term as a prefix of another catches the plural and the
+      // common inflections that matter here.
+      if (picked.some((chosen) => sharesStem(chosen, term))) continue;
       picked.push(term);
       if (picked.length === TERMS_PER_LABEL) break;
     }
