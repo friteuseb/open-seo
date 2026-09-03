@@ -238,6 +238,19 @@ export function InternalLinkingView({
     return matches;
   }, [query, visibleNodes]);
 
+  // In fullscreen the toolbar and the legend float over the graph instead of
+  // taking a band of the screen each; everywhere else they stay in the flow.
+  const overlayCard =
+    "absolute z-10 rounded-lg border border-base-300 bg-base-100/90 px-3 py-2 shadow-lg backdrop-blur";
+  // The graph's own zoom buttons sit in the top-right corner, so the toolbar
+  // stops short of them.
+  const toolbarClass = isFullscreen
+    ? `${overlayCard} left-3 top-3 max-w-[calc(100%-5rem)]`
+    : "";
+  const bottomBarClass = isFullscreen
+    ? `${overlayCard} inset-x-3 bottom-3`
+    : "";
+
   if (!hasGraphMetrics) {
     return (
       <div className="flex items-start gap-3 rounded-lg border border-base-300 bg-base-200/40 px-4 py-3 text-sm text-base-content/70">
@@ -263,11 +276,14 @@ export function InternalLinkingView({
 
       <div
         ref={panelRef}
-        className={`flex flex-col gap-3 ${
-          isFullscreen ? "h-screen w-screen bg-base-100 p-4" : ""
-        }`}
+        // No position utility in fullscreen: the browser positions the
+        // fullscreen element itself, and overriding it would take the panel
+        // out of the top layer. Its fixed box is what the overlays anchor to.
+        className={
+          isFullscreen ? "h-screen w-screen bg-base-100" : "flex flex-col gap-3"
+        }
       >
-        <div className="flex flex-wrap items-center gap-2">
+        <div className={`flex flex-wrap items-center gap-2 ${toolbarClass}`}>
           <div role="tablist" className="tabs tabs-boxed tabs-sm">
             <button
               role="tab"
@@ -328,39 +344,41 @@ export function InternalLinkingView({
           onClearSelection={clearSelection}
           isFullscreen={isFullscreen}
           onToggleFullscreen={toggleFullscreen}
-          className={isFullscreen ? "min-h-0 flex-1" : "h-[560px]"}
+          className="h-[560px]"
         />
 
-        <div className="flex flex-wrap items-center gap-3">
-          <ThemeLegend
-            nodes={visibleNodes}
-            splittableThemes={splittableThemes}
-            onDrillInto={drilledTheme == null ? setDrilledTheme : undefined}
-          />
-          {drilledTheme != null && (
-            <button
-              className="btn btn-ghost btn-xs"
-              onClick={() => setDrilledTheme(null)}
-            >
-              ← All topics
-            </button>
-          )}
-          {hiddenUrls.size > 0 && (
-            <button className="btn btn-ghost btn-xs" onClick={showAllNodes}>
-              Show {hiddenUrls.size} hidden page
-              {hiddenUrls.size === 1 ? "" : "s"}
-            </button>
+        <div className={`flex flex-col gap-3 ${bottomBarClass}`}>
+          <div className="flex flex-wrap items-center gap-3">
+            <ThemeLegend
+              nodes={visibleNodes}
+              splittableThemes={splittableThemes}
+              onDrillInto={drilledTheme == null ? setDrilledTheme : undefined}
+            />
+            {drilledTheme != null && (
+              <button
+                className="btn btn-ghost btn-xs"
+                onClick={() => setDrilledTheme(null)}
+              >
+                ← All topics
+              </button>
+            )}
+            {hiddenUrls.size > 0 && (
+              <button className="btn btn-ghost btn-xs" onClick={showAllNodes}>
+                Show {hiddenUrls.size} hidden page
+                {hiddenUrls.size === 1 ? "" : "s"}
+              </button>
+            )}
+          </div>
+
+          {selectedNode ? (
+            <SelectedPage node={selectedNode} onClose={clearSelection} />
+          ) : (
+            <p className="text-xs text-base-content/50">
+              Click a page to light up what it links to and what links to it ·
+              right-click to hide it · scroll to zoom
+            </p>
           )}
         </div>
-
-        {selectedNode ? (
-          <SelectedPage node={selectedNode} onClose={clearSelection} />
-        ) : (
-          <p className="text-xs text-base-content/50">
-            Click a page to light up what it links to and what links to it ·
-            right-click to hide it · scroll to zoom
-          </p>
-        )}
       </div>
 
       <SuggestionsList suggestions={suggestions} />

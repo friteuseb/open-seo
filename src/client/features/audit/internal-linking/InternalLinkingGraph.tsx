@@ -48,7 +48,10 @@ export function InternalLinkingGraph({
   onClearSelection: () => void;
   isFullscreen: boolean;
   onToggleFullscreen: () => void;
-  /** Sets the frame's height — the graph fills whatever box it is given. */
+  /**
+   * Sets the frame's height while the graph sits in the page's flow. Ignored
+   * in fullscreen, where the frame covers the whole panel.
+   */
   className?: string;
 }) {
   const svgRef = useRef<SVGSVGElement>(null);
@@ -136,7 +139,14 @@ export function InternalLinkingGraph({
   return (
     <div
       ref={containerRef}
-      className={`relative w-full overflow-hidden rounded-lg border border-base-300 bg-base-100 ${className}`}
+      // Fullscreen gives the frame the entire panel and the chrome floats over
+      // it: a graph read at arm's length wants every pixel, and a toolbar in
+      // the flow above it costs a fifth of the screen.
+      className={`w-full overflow-hidden bg-base-100 ${
+        isFullscreen
+          ? "absolute inset-0"
+          : `relative rounded-lg border border-base-300 ${className}`
+      }`}
     >
       {nodes.length === 0 ? (
         <p className="absolute inset-0 grid place-items-center text-sm text-base-content/60">
