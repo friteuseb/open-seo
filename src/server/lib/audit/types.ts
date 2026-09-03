@@ -50,7 +50,7 @@ export interface PageLink {
   isInternal: boolean;
   isNofollow: boolean;
   /**
-   * The link sits in navigation chrome (menu, footer, sidebar) rather than in
+   * The link sits in the site's template (menu, footer, sidebar) rather than in
    * the page's body. Boilerplate links are kept out of the link graph's
    * metrics — see link-placement.ts.
    */

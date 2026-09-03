@@ -159,7 +159,7 @@ export const auditLinks = sqliteTable(
       .references(() => audits.id, { onDelete: "cascade" }),
     sourcePageId: text("source_page_id").notNull(),
     targetPageId: text("target_page_id").notNull(),
-    /** Link sits in navigation chrome (menu, footer, sidebar), not the body. */
+    /** Link sits in the site's template (menu, footer, sidebar), not the body. */
     isBoilerplate: integer("is_boilerplate", { mode: "boolean" })
       .notNull()
       .default(false),

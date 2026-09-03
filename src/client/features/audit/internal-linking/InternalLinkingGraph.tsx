@@ -139,9 +139,9 @@ export function InternalLinkingGraph({
   return (
     <div
       ref={containerRef}
-      // Fullscreen gives the frame the entire panel and the chrome floats over
-      // it: a graph read at arm's length wants every pixel, and a toolbar in
-      // the flow above it costs a fifth of the screen.
+      // Fullscreen gives the frame the entire panel and the controls float
+      // over it: a graph read at arm's length wants every pixel, and a toolbar
+      // in the flow above it costs a fifth of the screen.
       className={`w-full overflow-hidden bg-base-100 ${
         isFullscreen
           ? "absolute inset-0"

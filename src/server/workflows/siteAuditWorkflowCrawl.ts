@@ -311,7 +311,8 @@ async function persistCrawledPages(input: {
 
     let storedForPage = 0;
     // Body links first: on a mega-menu page the per-page cap would otherwise
-    // be spent on chrome, and the body links are what the graph is built from.
+    // be spent on the template, and the body links are what the graph is built
+    // from.
     const internalLinks = sort(
       page.links.filter((link) => link.isInternal),
       (a, b) => Number(a.isBoilerplate) - Number(b.isBoilerplate),

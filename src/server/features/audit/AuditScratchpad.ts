@@ -64,7 +64,7 @@ export interface ScratchpadLinkRow {
   targetUrl: string;
   anchor: string | null;
   isNofollow: boolean;
-  /** Link sits in navigation chrome rather than the page body. */
+  /** Link sits in the site's template rather than the page body. */
   isBoilerplate: boolean;
 }
 
@@ -128,8 +128,8 @@ const CLEANUP_AFTER_MS = 7 * 24 * 60 * 60 * 1000;
  */
 const LINK_STORAGE_BUDGET_BYTES = 500 * 1024 * 1024;
 /**
- * A target linked from at least this share of the crawled pages is template
- * chrome whatever its markup says — plenty of sites still build menus out of
+ * A target linked from at least this share of the crawled pages belongs to the
+ * template whatever its markup says — plenty of sites still build menus out of
  * unlabelled `<div>`s that link-placement.ts cannot recognise. Deliberately
  * high, and only applied past MIN_PAGES_FOR_SITEWIDE_LINKS: on a ten-page site
  * a genuinely well cross-linked body would trip a lower threshold.
@@ -373,7 +373,8 @@ export class AuditScratchpad extends DurableObject {
   }
 
   /**
-   * Flags every link to a target that most of the site links to as chrome.
+   * Flags every link to a target that most of the site links to as a template
+   * link.
    *
    * The per-page classifier reads markup, so it misses menus built from
    * unlabelled `<div>`s. Repetition catches those: a target reachable from
@@ -404,7 +405,7 @@ export class AuditScratchpad extends DurableObject {
    *
    * Metrics and suggestions read body links only. A menu links every page to
    * every other one, which flattens PageRank towards uniform and makes every
-   * pair look already linked; the chrome edges are still returned, so the
+   * pair look already linked; the template edges are still returned, so the
    * graph can draw them on request.
    */
   async computeLinkGraphAnalysis(input: {
@@ -423,7 +424,7 @@ export class AuditScratchpad extends DurableObject {
       .toArray()
       .map((row) => row.page_id);
 
-    // Body links first, so they fill LINK_EDGE_CAP before the chrome does.
+    // Body links first, so they fill LINK_EDGE_CAP before the template ones do.
     const edges = this.ctx.storage.sql
       .exec<{
         source_page_id: string;

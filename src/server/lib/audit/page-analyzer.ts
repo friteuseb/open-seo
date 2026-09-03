@@ -41,7 +41,7 @@ interface OpenAnchor {
   href: string;
   rel: string;
   text: string[];
-  /** Whether the anchor opened inside navigation chrome (see link-placement). */
+  /** Whether the anchor opened inside the site's template (see link-placement). */
   isBoilerplate: boolean;
 }
 
@@ -78,8 +78,8 @@ export function analyzeHtml(
   const linksByTarget = new Map<string, PageLink>();
   let openAnchor: OpenAnchor | null = null;
 
-  // Chrome tracking: element depth so a plain `</div>` can't close the menu
-  // `<div>` that wraps it, and the depths at which chrome subtrees opened.
+  // Template tracking: element depth so a plain `</div>` can't close the menu
+  // `<div>` that wraps it, and the depths at which template subtrees opened.
   let elementDepth = 0;
   let contentScopeDepth = 0;
   const boilerplateDepths: number[] = [];

@@ -256,7 +256,7 @@ describe("analyzeHtml link placement", () => {
     );
   }
 
-  it("reads chrome from landmarks and from class names", () => {
+  it("reads template links from landmarks and from class names", () => {
     const placement = placementByPath(`<body>
       <header><a href="/home">Home</a></header>
       <nav><a href="/menu">Menu</a></nav>
@@ -273,7 +273,7 @@ describe("analyzeHtml link placement", () => {
 
   it("ignores the state classes a CMS hangs on the body", () => {
     // WordPress writes class="home ... fixed-nav menu-home" on <body>; reading
-    // that as a menu would classify the whole document as chrome.
+    // that as a menu would classify the whole document as one big template.
     const placement = placementByPath(`<body class="home fixed-nav menu-home">
       <p><a href="/body">In the body</a></p>
     </body>`);
@@ -306,7 +306,7 @@ describe("analyzeHtml link placement", () => {
     expect(placement.get("/tag")).toBe(false);
   });
 
-  it("leaves chrome when a plain element inside it closes", () => {
+  it("leaves the template when a plain element inside it closes", () => {
     const placement = placementByPath(`<body>
       <div class="main-navigation"><div><a href="/menu">Menu</a></div></div>
       <p><a href="/body">In the body</a></p>
