@@ -20,6 +20,12 @@ import {
   CRAWL_WINDOW,
   RETRY_CRAWL_WINDOW,
 } from "@/server/lib/audit/crawl-window";
+import {
+  noteThrottled,
+  NO_THROTTLE,
+  THROTTLE,
+  wasThrottled,
+} from "@/server/lib/audit/crawl-throttle";
 import { crawlPage } from "@/server/workflows/site-audit-workflow-helpers";
 import { pgStep } from "@/server/workflows/pgStep";
 import { CRAWL_CHUNK_STEP } from "@/server/workflows/auditStepConfigs";
@@ -190,6 +196,12 @@ async function runCrawlChunk(
   const inFlight = new Set<Promise<void>>();
   let persistThreshold = FIRST_PERSIST_BATCH_SIZE;
   let batch: CrawledPageResult[] = [];
+  // URLs a 429 sent back to the queue, and how often each was attempted.
+  // Both are chunk-local: the scratchpad lease is still held, so a retry
+  // needs no round trip to the DO.
+  const retryQueue: ClaimedUrl[] = [];
+  const attemptsByUrl = new Map<string, number>();
+  let throttle = NO_THROTTLE;
   // Persistence runs concurrently with fetching (pipelined) but sequentially
   // with itself, so DB write pressure stays bounded at one batch at a time.
   let persistChain: Promise<unknown> = Promise.resolve();
@@ -200,7 +212,12 @@ async function runCrawlChunk(
     const pages = batch;
     batch = [];
     persistThreshold = PERSIST_BATCH_SIZE;
-    windowSize = adjustCrawlWindow(windowSize, pages, limits);
+    // A site that rate-limited us keeps the narrow window for the rest of
+    // the chunk; letting a clean sub-batch widen it again would walk
+    // straight back into the 429s.
+    windowSize = wasThrottled(throttle)
+      ? THROTTLE.window
+      : adjustCrawlWindow(windowSize, pages, limits);
     queuedPersists += 1;
     persistChain = persistChain
       .then(() =>
@@ -221,8 +238,18 @@ async function runCrawlChunk(
   };
 
   const launch = (entry: ClaimedUrl) => {
+    const attempt = (attemptsByUrl.get(entry.url) ?? 0) + 1;
+    attemptsByUrl.set(entry.url, attempt);
     const promise = crawlPage(entry.url, entry.depth, entry.inSitemap)
       .then((page) => {
+        if (page.statusCode === 429 && attempt < THROTTLE.maxAttempts) {
+          // 429 is about our pace, not about the page: pause the window,
+          // narrow it, and ask again instead of recording an empty row.
+          throttle = noteThrottled(throttle, Date.now(), page.retryAfterMs);
+          windowSize = THROTTLE.window;
+          retryQueue.push(entry);
+          return;
+        }
         attemptedInChunk += 1;
         batch.push(page);
         if (batch.length >= persistThreshold) flush();
@@ -236,18 +263,37 @@ async function runCrawlChunk(
   while (true) {
     while (
       inFlight.size < windowSize &&
-      nextIndex < claimed.length &&
-      Date.now() < deadlineAt
+      Date.now() < deadlineAt &&
+      Date.now() >= throttle.pausedUntil
     ) {
       // queuedPersists changes when persistChain settles. Keep it out of the
       // loop condition because the type-aware linter cannot see that async
       // mutation and flags the otherwise valid backpressure check.
       if (queuedPersists > MAX_QUEUED_PERSIST_BATCHES) break;
+      // Retries first: they are already-leased URLs whose only problem was
+      // timing, and finishing them keeps the chunk's page count honest.
+      const retry = retryQueue.shift();
+      if (retry) {
+        launch(retry);
+        continue;
+      }
+      if (nextIndex >= claimed.length) break;
       launch(claimed[nextIndex]);
       nextIndex += 1;
     }
     if (inFlight.size > 0) {
       await Promise.race(inFlight);
+      continue;
+    }
+    // Nothing in flight, the whole window waiting out a 429: sleep off the
+    // pause and resume, as long as the chunk still has work and time.
+    const now = Date.now();
+    if (
+      now < throttle.pausedUntil &&
+      now < deadlineAt &&
+      (retryQueue.length > 0 || nextIndex < claimed.length)
+    ) {
+      await scheduler.wait(Math.min(throttle.pausedUntil, deadlineAt) - now);
       continue;
     }
     // Nothing in flight. If launches are only paused by persistence
@@ -266,8 +312,12 @@ async function runCrawlChunk(
   flush();
   await persistChain;
 
-  // Leases we never launched (soft deadline) go back to the queue.
-  const unattempted = claimed.slice(nextIndex).map((entry) => entry.url);
+  // Leases we never launched, and retries the deadline cut short, go back to
+  // the queue for the next chunk.
+  const unattempted = [
+    ...retryQueue.map((entry) => entry.url),
+    ...claimed.slice(nextIndex).map((entry) => entry.url),
+  ];
   if (unattempted.length > 0) {
     await scratchpad.releaseUrls(unattempted);
   }

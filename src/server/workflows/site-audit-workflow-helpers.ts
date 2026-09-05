@@ -55,6 +55,19 @@ function classifyFetch(
   return "ok";
 }
 
+/**
+ * Parse a `Retry-After` header (delay-seconds or HTTP-date) into ms. Null
+ * when absent or unparseable, which leaves the crawl on its own backoff.
+ */
+function parseRetryAfterMs(header: string | null): number | null {
+  if (!header) return null;
+  const seconds = Number(header.trim());
+  if (Number.isFinite(seconds)) return seconds >= 0 ? seconds * 1_000 : null;
+  const date = Date.parse(header);
+  if (Number.isNaN(date)) return null;
+  return Math.max(0, date - Date.now());
+}
+
 /** Parse `Link: <url>; rel="canonical"` response headers. */
 function parseLinkHeaderCanonical(
   linkHeader: string | null,
@@ -143,6 +156,8 @@ export async function crawlPage(
         // The body was still fetched and buffered; report its size so the
         // crawl window's byte budget sees blocked/error pages too.
         htmlBytes: body.length,
+        retryAfterMs:
+          parseRetryAfterMs(response.headers.get("retry-after")) ?? undefined,
       });
     }
 
@@ -273,6 +288,7 @@ function emptyPageResult(input: {
   crawlDepth: number | null;
   inSitemap: boolean;
   htmlBytes?: number;
+  retryAfterMs?: number;
 }): CrawledPageResult {
   return {
     id: crypto.randomUUID(),
@@ -301,6 +317,7 @@ function emptyPageResult(input: {
     contentHash: null,
     isHtml: false,
     htmlBytes: input.htmlBytes ?? 0,
+    retryAfterMs: input.retryAfterMs,
     imagesTotal: 0,
     imagesMissingAlt: 0,
     images: [],

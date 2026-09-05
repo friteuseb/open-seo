@@ -155,6 +155,11 @@ export interface CrawledPageResult {
    * response time is measured at headers and says nothing about body size.
    */
   htmlBytes: number;
+  /**
+   * `Retry-After` on a 429, in ms. Transient — tells the crawl how long the
+   * site asked us to wait before retrying this URL.
+   */
+  retryAfterMs?: number;
   imagesTotal: number;
   imagesMissingAlt: number;
   images: Array<{ src: string | null; alt: string | null }>;
